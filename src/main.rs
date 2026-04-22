@@ -2,20 +2,19 @@ use std::fmt::format;
 use std::path::Path;
 use image::open;
 use minifb::{Key, Window, WindowOptions};
-use minifb::Key::H;
 
-const WIDTH: usize = 1500;
+const WIDTH: usize = 2000;
 const HEIGHT: usize = 1200;
 
 const TILE_HEIGHT: usize = 8;
 
 const TILE_WIDTH: usize = 16;
 
-const GRID_HEIGHT: usize = 40;
-const GRID_WIDTH: usize = 30;
+const GRID_HEIGHT: usize = 60;
+const GRID_WIDTH: usize = 60;
 
 const VIEW_HEIGHT: usize = 30;
-const VIEW_WIDTH: usize = 30;
+const VIEW_WIDTH: usize = 50;
 
 fn main() {
     let stone = Sprite::new("resources/stone.png");
@@ -34,12 +33,12 @@ fn main() {
         }
     }
 
-    let epicentre= (GRID_WIDTH as i32 / 2, GRID_HEIGHT as i32 -1, GRID_WIDTH as i32 / 2);
+    let epicentre= (GRID_WIDTH / 2, GRID_HEIGHT -1, GRID_WIDTH / 2);
 
     for i in 0..GRID_WIDTH {
-        for j in 0..GRID_WIDTH {
-            for k in 0..GRID_HEIGHT {
-                if (i as i32 - epicentre.0).pow(2) + (j as i32 - epicentre.1).pow(2) + (k as i32 - epicentre.2).pow(2) < 30 {
+        for j in 0..GRID_HEIGHT {
+            for k in 0..GRID_WIDTH {
+                if (i as i32 - epicentre.0 as i32).pow(2) + (j as i32 - epicentre.1 as i32).pow(2) + (k as i32 - epicentre.2 as i32).pow(2) < 30 {
                     cubes[get_vector_pos((i,j,k))] = 5;
                 }
             }
@@ -64,30 +63,30 @@ fn main() {
     while window.is_open() && !window.is_key_down(Key::Escape) {
         buffer.fill(0xFFFFFF);
 
-        if window.get_keys().contains(&Key::Right) {
+        if window.get_keys().contains(&Key::Right) && view_x < GRID_WIDTH - VIEW_WIDTH {
             view_x += 1;
-            if view_x > WIDTH  - 1 {
-                view_x = WIDTH - 1;
-            }
         }
-        if window.get_keys().contains(&Key::Left) {
+        if window.get_keys().contains(&Key::Left) && view_x > 0 {
             view_x -= 1;
-            if view_x < 0 {
-                view_x = 0;
-            }
+        }
+        if window.get_keys().contains(&Key::W) && view_z < GRID_WIDTH - VIEW_WIDTH {
+            view_z += 1;
+        }
+        if window.get_keys().contains(&Key::S) && view_z > 0 {
+            view_z -= 1;
         }
         if window.get_keys().contains(&Key::Down) && view_y > 0 {
             view_y -= 1;
         }
-        if window.get_keys().contains(&Key::Up) && view_y < HEIGHT - 1 {
+        if window.get_keys().contains(&Key::Up) && view_y < GRID_HEIGHT - VIEW_HEIGHT {
             view_y += 1;
         }
 
         for y in 0..VIEW_HEIGHT {
             for z in 0..VIEW_WIDTH {
-                for x in 0..VIEW_WIDTH { //be careful of draw order
+                for x in 0..VIEW_WIDTH {
                     let view_index = x + y * VIEW_WIDTH * VIEW_WIDTH + z * VIEW_WIDTH;
-                    let cube_index = view_index + view_x * GRID_WIDTH * GRID_HEIGHT + view_y * GRID_WIDTH * GRID_WIDTH + view_z * GRID_WIDTH * GRID_HEIGHT;
+                    let cube_index = (x + view_x) + ((y + view_y) * GRID_WIDTH * GRID_WIDTH) + (z + view_z) * GRID_HEIGHT;
 
                     if (cubes[cube_index] == 5) {
                         continue;
@@ -109,26 +108,6 @@ fn main() {
                 }
             }
         }
-
-        /**
-        for i in 30 * 30 * 30 {
-            if let Some(next_x) = get_cube_next_x(sprite) {
-                if let Some(next_z) = get_cube_next_z(sprite) {
-                    if let Some(above) = get_cube_above(sprite) {
-                        if cubes[next_x] != 5 && cubes[next_z] != 5 && cubes[above] != 5 {
-                            continue
-                        }
-                    }
-                }
-            }
-
-            let cube = get_screen_coord(get_grid_pos(i));
-            let cube = (cube.0 + (WIDTH / 2) as i32, cube.1 + (HEIGHT / 2) as i32);
-
-            draw_sprite((cube.0 as usize - 16, cube.1 as usize - 32), &sprites[cubes[sprite] as usize], &mut buffer);
-        }
-       */
-
 
         window
             .update_with_buffer(&buffer, WIDTH, HEIGHT)
@@ -191,7 +170,10 @@ fn draw_sprite(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32
             if sprite.pixels[x + y * 32] == 16777216 {
                 continue
             }
-            buffer[(screen_pos.0 + WIDTH * screen_pos.1) + x + y * WIDTH] = sprite.pixels[x + y * 32]
+            let pixel = (screen_pos.0 + WIDTH * screen_pos.1) + x + y * WIDTH;
+            if (pixel < buffer.len()) {
+                buffer[pixel] = sprite.pixels[x + y * 32]
+            }
         }
     }
 
@@ -209,37 +191,5 @@ impl Sprite {
         Sprite {
             pixels
         }
-    }
-}
-
-struct ViewRange {
-    height: usize,
-    width: usize,
-    start_x: usize,
-    start_y: usize,
-    start_z: usize,
-    current: (usize, usize, usize),
-}
-
-impl Iterator for ViewRange {
-    type Item = (usize, usize); //todo make this usize again
-
-    fn next(&mut self) -> Option<Self::Item> {
-
-        let mut next_x = self.current.0 + 1;
-        let mut next_y = self.current.1;
-        let mut next_z = self.current.2;
-        if next_x >= self.width {
-            next_x = 0;
-            next_z += 1;
-            if next_z >= self.width {
-                next_z = 0;
-                next_y += 1;
-            }
-        }
-        let next = (next_x, next_y, next_z);
-        self.current = next;
-
-        return if next_y == self.height { None } else { Some((get_vector_pos(next), get_vector_pos((next.0 + self.start_x, next.1 + self.start_y, next.2 + self.start_z)))) } ;
     }
 }
