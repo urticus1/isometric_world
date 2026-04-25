@@ -10,11 +10,11 @@ const TILE_WIDTH: usize = 24;
 const TILE_HEIGHT: usize = TILE_WIDTH / 2;
 
 
-const GRID_HEIGHT: usize = 60;
-const GRID_WIDTH: usize = 60;
+const GRID_HEIGHT: usize = 120;
+const GRID_WIDTH: usize = 120;
 
-const VIEW_HEIGHT: usize = 30;
-const VIEW_WIDTH: usize = 50;
+const VIEW_HEIGHT: usize = 20;
+const VIEW_WIDTH: usize = 60;
 
 
 fn create_pixels() {
@@ -52,6 +52,7 @@ fn main() {
     let stone = Sprite::new("resources/24/stone.png");
     let mud = Sprite::new("resources/24/mud.png");
     let grass = Sprite::new("resources/24/grass.png");
+    let blank = Sprite::new("resources/24/blank.png");
 
     let sprites = vec![stone, mud, grass];
 
@@ -59,9 +60,14 @@ fn main() {
 
     for i in 0..GRID_WIDTH {
         for j in 0..GRID_WIDTH {
-            cubes[get_vector_pos((i,GRID_HEIGHT - 2,j))] = 1;
-            cubes[get_vector_pos((i,GRID_HEIGHT - 3,j))] = 1;
-            cubes[get_vector_pos((i,GRID_HEIGHT - 4,j))] = 1;
+            cubes[get_vector_pos((i,GRID_HEIGHT - 1,j))] = 5;
+            cubes[get_vector_pos((i,GRID_HEIGHT - 2,j))] = 5;
+            cubes[get_vector_pos((i,GRID_HEIGHT - 3,j))] = 5;
+            cubes[get_vector_pos((i,GRID_HEIGHT - 4,j))] = 5;
+            cubes[get_vector_pos((i,GRID_HEIGHT - 5,j))] = 2;
+            cubes[get_vector_pos((i,GRID_HEIGHT - 6,j))] = 2;
+            cubes[get_vector_pos((i,GRID_HEIGHT - 7,j))] = 1;
+            cubes[get_vector_pos((i,GRID_HEIGHT - 8,j))] = 1;
         }
     }
 
@@ -89,13 +95,27 @@ fn main() {
 
     let mut buffer: Vec<u32> = vec![0xFFFFFF; WIDTH * HEIGHT];
 
+    let mut render_window = vec![];
 
+    for y in 0..VIEW_HEIGHT {
+        for z in 0..VIEW_WIDTH {
+            for x in 0..VIEW_WIDTH {
+                let view_index = x + y * VIEW_WIDTH * VIEW_WIDTH + z * VIEW_WIDTH;
+                let cube = get_screen_coord(get_grid_pos(view_index));
+                let cube = (cube.0 + (WIDTH / 2) as i32, cube.1 + (HEIGHT / 2) as i32);
+                render_window.push(cube);
+                draw_sprite_test((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &blank, &mut buffer);
+                draw_sprite_test_right((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &blank, &mut buffer);
+                draw_sprite_top((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &blank, &mut buffer);
+            }
+        }
+    }
 
     let mut view_x = 0;
     let mut view_z = 0;
     let mut view_y = 0;
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        buffer.fill(0xFFFFFF);
+        let mut buffer = buffer.clone();
         draw_sprite_test((0,0) ,&sprites[1], &mut buffer);
         draw_sprite_test_right((30,30) ,&sprites[1], &mut buffer);
         if window.get_keys().contains(&Key::Right) && view_x < GRID_WIDTH - VIEW_WIDTH {
@@ -117,6 +137,8 @@ fn main() {
             view_y += 1;
         }
 
+
+
         for y in 0..VIEW_HEIGHT {
             for z in 0..VIEW_WIDTH {
                 for x in 0..VIEW_WIDTH {
@@ -131,7 +153,7 @@ fn main() {
                         if let Some(next_z) = get_cube_next_z(cube_index) {
                             if let Some(above) = get_cube_above(cube_index) {
                                 if cubes[next_x] != 5 && cubes[next_z] != 5 && cubes[above] != 5 {
-                                    continue
+                                    //continue
                                 }
                             }
                         }
@@ -150,7 +172,6 @@ fn main() {
                         }
                         else {
                             draw_sprite_test_right((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &sprites[cubes[cube_index] as usize], &mut buffer)
-
                         }
 
                         if let Some(next_z) = get_cube_next_z(cube_index) {
@@ -175,7 +196,9 @@ fn main() {
                     }
 
 
-                    //draw_sprite((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &sprites[cubes[cube_index] as usize], &mut buffer);
+                    //draw_sprite_top((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &sprites[cubes[cube_index] as usize], &mut buffer);
+                    //draw_sprite_test((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &sprites[cubes[cube_index] as usize], &mut buffer);
+                    //draw_sprite_test_right((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &sprites[cubes[cube_index] as usize], &mut buffer);
                 }
             }
         }
