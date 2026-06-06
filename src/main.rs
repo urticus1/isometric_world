@@ -1,14 +1,12 @@
-use std::fmt::format;
 use std::path::Path;
 use image::open;
 use minifb::{Key, Window, WindowOptions};
 
-const WIDTH: usize = 2000;
-const HEIGHT: usize = 1200;
+const SCREEN_WIDTH: usize = 2000;
+const SCREEN_HEIGHT: usize = 1200;
 
 const TILE_WIDTH: usize = 24;
-const TILE_HEIGHT: usize = TILE_WIDTH / 2;
-
+const TILE_HALF_WIDTH: usize = TILE_WIDTH / 2;
 
 const GRID_HEIGHT: usize = 120;
 const GRID_WIDTH: usize = 120;
@@ -16,55 +14,31 @@ const GRID_WIDTH: usize = 120;
 const VIEW_HEIGHT: usize = 20;
 const VIEW_WIDTH: usize = 60;
 
+const CUBE_TYPE_MASK: u32 = 0b11111111u8 as u32;
+const RIGHT_FACE_CUBE_MASK: u32 = CUBE_TYPE_MASK << 8;
+const LEFT_FACE_CUBE_MASK: u32 = CUBE_TYPE_MASK << 16;
+const TOP_FACE_CUBE_MASK: u32 = CUBE_TYPE_MASK << 24;
 
-fn create_pixels() {
-    for y in 6..24 {
-        let lim = if y < 12 { (y - 6 + 1) * 2 } else { 12 };
-        let start = if y < 19 { 0 } else { (y - 19) * 2 };
-        for x in start..lim {
-            print!("({}, {}), ", x , y);
-        }
-    }
-}
-
-fn create_pixels_top() {
-    let mut low:usize = 12;
-    let mut high:usize = 11;
-    for y in 0..11 {
-        if (y <= 5) {
-            low = low -  2;
-            high = high + 2;
-        }
-        else {
-            low = low +  2;
-            high = high - 2;
-        }
-
-        for x in low..=high {
-            print!("({}, {}), ", x , y);
-        }
-    }
-}
+const EMPTY_CUBE: u32 = 8;
 
 fn main() {
-    //create_pixels();
-    create_pixels_top();
     let stone = Sprite::new("resources/24/stone.png");
     let mud = Sprite::new("resources/24/mud.png");
     let grass = Sprite::new("resources/24/grass.png");
     let blank = Sprite::new("resources/24/blank.png");
+    let floor = Sprite::new("resources/24/floor.png");
 
-    let sprites = vec![stone, mud, grass];
+    let sprites = vec![stone, mud, grass, blank, floor];
 
     let mut cubes = vec![0u32; GRID_HEIGHT * GRID_WIDTH * GRID_WIDTH];
 
     for i in 0..GRID_WIDTH {
         for j in 0..GRID_WIDTH {
-            cubes[get_vector_pos((i,GRID_HEIGHT - 1,j))] = 5;
-            cubes[get_vector_pos((i,GRID_HEIGHT - 2,j))] = 5;
-            cubes[get_vector_pos((i,GRID_HEIGHT - 3,j))] = 5;
-            cubes[get_vector_pos((i,GRID_HEIGHT - 4,j))] = 5;
-            cubes[get_vector_pos((i,GRID_HEIGHT - 5,j))] = 2;
+            cubes[get_vector_pos((i,GRID_HEIGHT - 1,j))] = EMPTY_CUBE;
+            cubes[get_vector_pos((i,GRID_HEIGHT - 2,j))] = EMPTY_CUBE;
+            cubes[get_vector_pos((i,GRID_HEIGHT - 3,j))] = EMPTY_CUBE;
+            cubes[get_vector_pos((i,GRID_HEIGHT - 4,j))] = EMPTY_CUBE;
+            cubes[get_vector_pos((i,GRID_HEIGHT - 5,j))] = 2 + (4 << 24);
             cubes[get_vector_pos((i,GRID_HEIGHT - 6,j))] = 2;
             cubes[get_vector_pos((i,GRID_HEIGHT - 7,j))] = 1;
             cubes[get_vector_pos((i,GRID_HEIGHT - 8,j))] = 1;
@@ -76,48 +50,30 @@ fn main() {
     for i in 0..GRID_WIDTH {
         for j in 0..GRID_HEIGHT {
             for k in 0..GRID_WIDTH {
-                if (i as i32 - epicentre.0 as i32).pow(2) + (j as i32 - epicentre.1 as i32).pow(2) + (k as i32 - epicentre.2 as i32).pow(2) < 30 {
-                    cubes[get_vector_pos((i,j,k))] = 5;
+                if (i as i32 - epicentre.0 as i32).pow(2) + (j as i32 - epicentre.1 as i32).pow(2) + (k as i32 - epicentre.2 as i32).pow(2) < 60 {
+                    cubes[get_vector_pos((i,j,k))] = EMPTY_CUBE;
                 }
             }
         }
     }
 
     let mut window = Window::new(
-        "Minifb Example",
-        WIDTH,
-        HEIGHT,
+        "Cubes",
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
         WindowOptions::default(),
     ).unwrap_or_else(|e| panic!("{}", e));
 
-    // Limit to ~60 fps
     window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
 
-    let mut buffer: Vec<u32> = vec![0xFFFFFF; WIDTH * HEIGHT];
+    let mut buffer: Vec<u32> = vec![0xFFFFFF; SCREEN_WIDTH * SCREEN_HEIGHT];
 
-    let mut render_window = vec![];
-
-    for y in 0..VIEW_HEIGHT {
-        for z in 0..VIEW_WIDTH {
-            for x in 0..VIEW_WIDTH {
-                let view_index = x + y * VIEW_WIDTH * VIEW_WIDTH + z * VIEW_WIDTH;
-                let cube = get_screen_coord(get_grid_pos(view_index));
-                let cube = (cube.0 + (WIDTH / 2) as i32, cube.1 + (HEIGHT / 2) as i32);
-                render_window.push(cube);
-                draw_sprite_test((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &blank, &mut buffer);
-                draw_sprite_test_right((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &blank, &mut buffer);
-                draw_sprite_top((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &blank, &mut buffer);
-            }
-        }
-    }
 
     let mut view_x = 0;
     let mut view_z = 0;
     let mut view_y = 0;
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let mut buffer = buffer.clone();
-        draw_sprite_test((0,0) ,&sprites[1], &mut buffer);
-        draw_sprite_test_right((30,30) ,&sprites[1], &mut buffer);
         if window.get_keys().contains(&Key::Right) && view_x < GRID_WIDTH - VIEW_WIDTH {
             view_x += 1;
         }
@@ -137,90 +93,108 @@ fn main() {
             view_y += 1;
         }
 
-
-
         for y in 0..VIEW_HEIGHT {
             for z in 0..VIEW_WIDTH {
                 for x in 0..VIEW_WIDTH {
                     let view_index = x + y * VIEW_WIDTH * VIEW_WIDTH + z * VIEW_WIDTH;
                     let cube_index = (x + view_x) + ((y + view_y) * GRID_WIDTH * GRID_WIDTH) + (z + view_z) * GRID_HEIGHT;
 
-                    if (cubes[cube_index] == 5) {
+                    let cube_data = cubes[cube_index];
+                    let cube_type = cube_data & CUBE_TYPE_MASK;
+                    if (cube_type == EMPTY_CUBE) {
                         continue;
                     }
 
-                    if let Some(next_x) = get_cube_next_x(cube_index) {
-                        if let Some(next_z) = get_cube_next_z(cube_index) {
-                            if let Some(above) = get_cube_above(cube_index) {
-                                if cubes[next_x] != 5 && cubes[next_z] != 5 && cubes[above] != 5 {
-                                    //continue
-                                }
-                            }
-                        }
-                    }
-
-
-
                     let cube = get_screen_coord(get_grid_pos(view_index));
-                    let cube = (cube.0 + (WIDTH / 2) as i32, cube.1 + (HEIGHT / 2) as i32);
+                    let cube_screen_x = (cube.0 + (SCREEN_WIDTH / 2) as i32) as usize - TILE_HALF_WIDTH;
+                    let cube_screen_y = (cube.1 + (SCREEN_WIDTH / 2) as i32) as usize - TILE_WIDTH;
+                    let cube_screen_y = cube_screen_y - (SCREEN_HEIGHT / 2);
 
-                    if true {
-                        if let Some(next_x) = get_cube_next_x(cube_index) {
-                            if cubes[next_x] == 5 {
-                                draw_sprite_test_right((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &sprites[cubes[cube_index] as usize], &mut buffer)
+
+                    if let Some(next_x) = get_cube_next_x(cube_index) {
+
+                        if cubes[next_x] & CUBE_TYPE_MASK == EMPTY_CUBE {
+                            let mut face = &sprites[cube_type as usize];
+                            if cube_data & RIGHT_FACE_CUBE_MASK != 0 {
+                                face = &sprites[((cube_data & RIGHT_FACE_CUBE_MASK) >> 8) as usize]
                             }
+                            draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer)
                         }
-                        else {
-                            draw_sprite_test_right((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &sprites[cubes[cube_index] as usize], &mut buffer)
+                    }
+                    else {
+                        let mut face = &sprites[cube_type as usize];
+                        if cube_data & RIGHT_FACE_CUBE_MASK != 0 {
+                            face = &sprites[((cube_data & RIGHT_FACE_CUBE_MASK) >> 8) as usize]
                         }
-
-                        if let Some(next_z) = get_cube_next_z(cube_index) {
-                            if cubes[next_z] == 5 {
-                                draw_sprite_test((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &sprites[cubes[cube_index] as usize], &mut buffer)
-                            }
-                        }
-                        else {
-                            draw_sprite_test((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &sprites[cubes[cube_index] as usize], &mut buffer)
-
-                        }
-
-                        if let Some(next_z) = get_cube_above(cube_index) {
-                            if cubes[next_z] == 5 {
-                                draw_sprite_top((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &sprites[cubes[cube_index] as usize], &mut buffer)
-                            }
-                        }
-                        else {
-                            draw_sprite_top((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &sprites[cubes[cube_index] as usize], &mut buffer)
-
-                        }
+                        draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer)
                     }
 
 
-                    //draw_sprite_top((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &sprites[cubes[cube_index] as usize], &mut buffer);
-                    //draw_sprite_test((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &sprites[cubes[cube_index] as usize], &mut buffer);
-                    //draw_sprite_test_right((cube.0 as usize - TILE_HEIGHT, cube.1 as usize - TILE_WIDTH), &sprites[cubes[cube_index] as usize], &mut buffer);
+                    if let Some(next_z) = get_cube_next_z(cube_index) {
+                        if cubes[next_z] & CUBE_TYPE_MASK == EMPTY_CUBE {
+                            let mut face = &sprites[cube_type as usize];
+                            if (cube_data & LEFT_FACE_CUBE_MASK) != 0 {
+                                face = &sprites[((cube_data & LEFT_FACE_CUBE_MASK) >> 16) as usize];
+                            }
+                            draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer)
+                        }
+                    }
+                    else {
+                        let mut face = &sprites[cube_type as usize];
+                        if (cube_data & LEFT_FACE_CUBE_MASK) != 0 {
+                            face = &sprites[((cube_data & LEFT_FACE_CUBE_MASK) >> 16) as usize];
+                        }
+                        draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer)
+                    }
+
+                    if let Some(next_y) = get_cube_above(cube_index) {
+                        if cubes[next_y] & CUBE_TYPE_MASK == EMPTY_CUBE {
+                            let mut face = &sprites[cube_type as usize];
+                            if cube_data & TOP_FACE_CUBE_MASK != 0 {
+                                face = &sprites[((cube_data & TOP_FACE_CUBE_MASK) >> 24) as usize]
+                            }
+                            draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer)
+                        }
+                    }
+                    else {
+                        let mut face = &sprites[cube_type as usize];
+                        if cube_data & TOP_FACE_CUBE_MASK != 0 {
+                            face = &sprites[((cube_data & TOP_FACE_CUBE_MASK) >> 24) as usize]
+                        }
+                        draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer)
+                    }
                 }
             }
         }
 
         window
-            .update_with_buffer(&buffer, WIDTH, HEIGHT)
+            .update_with_buffer(&buffer, SCREEN_WIDTH, SCREEN_HEIGHT)
             .unwrap();
     }
+}
+
+enum Face {
+    LEFT,
+    RIGHT,
+    TOP
+}
+
+fn render_cube_face(face: Face, cube_index: usize, buffer: &mut [u8]) {
+
 }
 
 fn get_cube_next_x(i: usize) -> Option<usize> {
     if i % GRID_WIDTH == GRID_WIDTH -1 {
         return None
     }
-    return Some(i + 1)
+    Some(i + 1)
 }
 
 fn get_cube_next_z(i: usize) -> Option<usize> {
     if i % (GRID_WIDTH * GRID_WIDTH) + GRID_WIDTH >= GRID_WIDTH * GRID_WIDTH {
         return None
     }
-    return Some(i + GRID_WIDTH)
+    Some(i + GRID_WIDTH)
 }
 
 fn get_cube_above(i: usize) -> Option<usize> {
@@ -238,7 +212,7 @@ fn get_screen_coord(world_space: (usize, usize, usize)) -> (i32, i32) {
 
     (
         (x - y) * (TILE_WIDTH / 2) as i32,
-        (x + y - 2 * z) * (TILE_HEIGHT / 2) as i32,
+        (x + y - 2 * z) * (TILE_HALF_WIDTH / 2) as i32,
     )
 }
 
@@ -269,7 +243,7 @@ fn draw_sprite(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32
                 continue
             }
           //  println!("didnt skip");
-            let pixel = (screen_pos.0 + WIDTH * screen_pos.1) + x + y * WIDTH;
+            let pixel = (screen_pos.0 + SCREEN_WIDTH * screen_pos.1) + x + y * SCREEN_WIDTH;
             if (pixel < buffer.len()) {
                 buffer[pixel] = value
             }
@@ -277,7 +251,7 @@ fn draw_sprite(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32
     }
 }
 
-fn draw_sprite_test(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>) {
+fn draw_left_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>) {
     let values = vec![(0, 6), (1, 6), (0, 7), (1, 7), (2, 7), (3, 7), (0, 8), (1, 8), (2, 8), (3, 8), (4, 8), (5, 8), (0, 9), (1, 9), (2, 9), (3, 9), (4, 9), (5, 9), (6, 9), (7, 9), (0, 10), (1, 10), (2, 10), (3, 10), (4, 10), (5, 10), (6, 10), (7, 10), (8, 10), (9, 10), (0, 11), (1, 11), (2, 11), (3, 11), (4, 11), (5, 11), (6, 11), (7, 11), (8, 11), (9, 11), (10, 11), (11, 11), (0, 12), (1, 12), (2, 12), (3, 12), (4, 12), (5, 12), (6, 12), (7, 12), (8, 12), (9, 12), (10, 12), (11, 12), (0, 13), (1, 13), (2, 13), (3, 13), (4, 13), (5, 13), (6, 13), (7, 13), (8, 13), (9, 13), (10, 13), (11, 13), (0, 14), (1, 14), (2, 14), (3, 14), (4, 14), (5, 14), (6, 14), (7, 14), (8, 14), (9, 14), (10, 14), (11, 14), (0, 15), (1, 15), (2, 15), (3, 15), (4, 15), (5, 15), (6, 15), (7, 15), (8, 15), (9, 15), (10, 15), (11, 15), (0, 16), (1, 16), (2, 16), (3, 16), (4, 16), (5, 16), (6, 16), (7, 16), (8, 16), (9, 16), (10, 16), (11, 16), (0, 17), (1, 17), (2, 17), (3, 17), (4, 17), (5, 17), (6, 17), (7, 17), (8, 17), (9, 17), (10, 17), (11, 17), (0, 18), (1, 18), (2, 18), (3, 18), (4, 18), (5, 18), (6, 18), (7, 18), (8, 18), (9, 18), (10, 18), (11, 18),  (2, 19), (3, 19), (4, 19), (5, 19), (6, 19), (7, 19), (8, 19), (9, 19), (10, 19), (11, 19),  (4, 20), (5, 20), (6, 20), (7, 20), (8, 20), (9, 20), (10, 20), (11, 20),  (6, 21), (7, 21), (8, 21), (9, 21), (10, 21), (11, 21),  (8, 22), (9, 22), (10, 22), (11, 22),  (10, 23), (11, 23)];
 
     for (x,y) in values {
@@ -289,14 +263,14 @@ fn draw_sprite_test(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Ve
             continue
         }
         //  println!("didnt skip");
-        let pixel = (screen_pos.0 + WIDTH * screen_pos.1) + x + y * WIDTH;
+        let pixel = (screen_pos.0 + SCREEN_WIDTH * screen_pos.1) + x + y * SCREEN_WIDTH;
         if (pixel < buffer.len()) {
             buffer[pixel] = value
         }
     }
 }
 
-fn draw_sprite_top(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>) {
+fn draw_top_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>) {
     let values = vec![(10, 0), (11, 0), (12, 0), (13, 0), (8, 1), (9, 1), (10, 1), (11, 1), (12, 1), (13, 1), (14, 1), (15, 1), (6, 2), (7, 2), (8, 2), (9, 2), (10, 2), (11, 2), (12, 2), (13, 2), (14, 2), (15, 2), (16, 2), (17, 2), (4, 3), (5, 3), (6, 3), (7, 3), (8, 3), (9, 3), (10, 3), (11, 3), (12, 3), (13, 3), (14, 3), (15, 3), (16, 3), (17, 3), (18, 3), (19, 3), (2, 4), (3, 4), (4, 4), (5, 4), (6, 4), (7, 4), (8, 4), (9, 4), (10, 4), (11, 4), (12, 4), (13, 4), (14, 4), (15, 4), (16, 4), (17, 4), (18, 4), (19, 4), (20, 4), (21, 4), (0, 5), (1, 5), (2, 5), (3, 5), (4, 5), (5, 5), (6, 5), (7, 5), (8, 5), (9, 5), (10, 5), (11, 5), (12, 5), (13, 5), (14, 5), (15, 5), (16, 5), (17, 5), (18, 5), (19, 5), (20, 5), (21, 5), (22, 5), (23, 5), (2, 6), (3, 6), (4, 6), (5, 6), (6, 6), (7, 6), (8, 6), (9, 6), (10, 6), (11, 6), (12, 6), (13, 6), (14, 6), (15, 6), (16, 6), (17, 6), (18, 6), (19, 6), (20, 6), (21, 6), (4, 7), (5, 7), (6, 7), (7, 7), (8, 7), (9, 7), (10, 7), (11, 7), (12, 7), (13, 7), (14, 7), (15, 7), (16, 7), (17, 7), (18, 7), (19, 7), (6, 8), (7, 8), (8, 8), (9, 8), (10, 8), (11, 8), (12, 8), (13, 8), (14, 8), (15, 8), (16, 8), (17, 8), (8, 9), (9, 9), (10, 9), (11, 9), (12, 9), (13, 9), (14, 9), (15, 9), (10, 10), (11, 10), (12, 10), (13, 10)];
       for (x,y) in values {
         let value = sprite.pixels[x + y * TILE_WIDTH];
@@ -307,17 +281,17 @@ fn draw_sprite_top(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec
             continue
         }
         //  println!("didnt skip");
-        let pixel = (screen_pos.0 + WIDTH * screen_pos.1) + x + y * WIDTH;
+        let pixel = (screen_pos.0 + SCREEN_WIDTH * screen_pos.1) + x + y * SCREEN_WIDTH;
         if (pixel < buffer.len()) {
             buffer[pixel] = value
         }
     }
 }
 
-fn draw_sprite_test_right(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>) {
+fn draw_right_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>) {
     let values = vec![(23, 6), (22, 6), (23, 7), (22, 7), (21, 7), (20, 7), (23, 8), (22, 8), (21, 8), (20, 8), (19, 8), (18, 8), (23, 9), (22, 9), (21, 9), (20, 9), (19, 9), (18, 9), (17, 9), (16, 9), (23, 10), (22, 10), (21, 10), (20, 10), (19, 10), (18, 10), (17, 10), (16, 10), (15, 10), (14, 10), (23, 11), (22, 11), (21, 11), (20, 11), (19, 11), (18, 11), (17, 11), (16, 11), (15, 11), (14, 11), (13, 11), (12, 11), (23, 12), (22, 12), (21, 12), (20, 12), (19, 12), (18, 12), (17, 12), (16, 12), (15, 12), (14, 12), (13, 12), (12, 12), (23, 13), (22, 13), (21, 13), (20, 13), (19, 13), (18, 13), (17, 13), (16, 13), (15, 13), (14, 13), (13, 13), (12, 13), (23, 14), (22, 14), (21, 14), (20, 14), (19, 14), (18, 14), (17, 14), (16, 14), (15, 14), (14, 14), (13, 14), (12, 14), (23, 15), (22, 15), (21, 15), (20, 15), (19, 15), (18, 15), (17, 15), (16, 15), (15, 15), (14, 15), (13, 15), (12, 15), (23, 16), (22, 16), (21, 16), (20, 16), (19,
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                16), (18, 16), (17, 16), (16, 16), (15, 16), (14, 16), (13, 16), (12, 16), (23, 17), (22, 17), (21, 17), (20, 17), (19, 17), (18, 17), (17, 17), (16, 17), (15, 17), (14, 17), (13, 17), (12, 17), (23, 18), (22, 18), (21, 18), (20, 18), (19, 18), (18, 18), (17, 18), (16, 18), (15, 18), (14, 18), (13, 18), (12, 18), (21, 19), (20, 19), (19, 19), (18, 19), (17, 19), (16, 19), (15, 19), (14, 19), (13, 19), (12, 19), (19, 20), (18, 20), (17, 20), (16, 20), (15, 20), (14, 20), (13, 20), (12, 20), (17, 21), (16, 21), (15, 21), (14, 21), (13, 21), (12, 21), (15, 22), (14, 22), (13, 22), (12, 22), (13, 23), (12, 23)];
-                      for (x,y) in values {
+    for (x,y) in values {
         let value = sprite.pixels[x + y * TILE_WIDTH];
         //println!("{} == {}", value, 16777216u32);
         //println!("{}", value == 16777216u32);
@@ -326,7 +300,7 @@ fn draw_sprite_test_right(screen_pos: (usize, usize), sprite: &Sprite, buffer: &
             continue
         }
         //  println!("didnt skip");
-        let pixel = (screen_pos.0 + WIDTH * screen_pos.1) + x + y * WIDTH;
+        let pixel = (screen_pos.0 + SCREEN_WIDTH * screen_pos.1) + x + y * SCREEN_WIDTH;
         if (pixel < buffer.len()) {
             buffer[pixel] = value
         }
