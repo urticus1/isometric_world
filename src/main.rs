@@ -1,9 +1,10 @@
 use std::path::Path;
 use image::open;
-use minifb::{Key, Window, WindowOptions};
+use minifb::{Key, MouseMode, Window, WindowOptions};
 
 const SCREEN_WIDTH: usize = 2000;
 const SCREEN_HEIGHT: usize = 1200;
+const SCREEN_Y_OFFSET: usize = SCREEN_HEIGHT / 4;
 
 const TILE_WIDTH: usize = 24;
 const TILE_HALF_WIDTH: usize = TILE_WIDTH / 2;
@@ -27,13 +28,15 @@ fn main() {
     let grass = Sprite::new("resources/24/grass.png");
     let blank = Sprite::new("resources/24/blank.png");
     let floor = Sprite::new("resources/24/floor.png");
+    let man = Sprite::new("resources/24/man1.png");
 
-    let sprites = vec![stone, mud, grass, blank, floor];
+    let sprites = vec![stone, mud, grass, blank, floor, man];
 
     let mut cubes = vec![0u32; GRID_HEIGHT * GRID_WIDTH * GRID_WIDTH];
 
     for i in 0..GRID_WIDTH {
         for j in 0..GRID_WIDTH {
+
             cubes[get_vector_pos((i,GRID_HEIGHT - 1,j))] = EMPTY_CUBE;
             cubes[get_vector_pos((i,GRID_HEIGHT - 2,j))] = EMPTY_CUBE;
             cubes[get_vector_pos((i,GRID_HEIGHT - 3,j))] = EMPTY_CUBE;
@@ -44,6 +47,8 @@ fn main() {
             cubes[get_vector_pos((i,GRID_HEIGHT - 8,j))] = 1;
         }
     }
+
+    cubes[get_vector_pos((GRID_WIDTH-1, GRID_HEIGHT - 1,GRID_WIDTH-1))] =5;
 
     let epicentre= (GRID_WIDTH / 2, GRID_HEIGHT -1, GRID_WIDTH / 2);
 
@@ -69,10 +74,11 @@ fn main() {
     let mut buffer: Vec<u32> = vec![0xFFFFFF; SCREEN_WIDTH * SCREEN_HEIGHT];
 
 
-    let mut view_x = 0;
-    let mut view_z = 0;
-    let mut view_y = 0;
+    let mut view_x = GRID_WIDTH - VIEW_WIDTH;
+    let mut view_z = GRID_WIDTH - VIEW_WIDTH;
+    let mut view_y = GRID_HEIGHT - VIEW_HEIGHT;
     while window.is_open() && !window.is_key_down(Key::Escape) {
+
         let mut buffer = buffer.clone();
         if window.get_keys().contains(&Key::Right) && view_x < GRID_WIDTH - VIEW_WIDTH {
             view_x += 1;
@@ -93,11 +99,16 @@ fn main() {
             view_y += 1;
         }
 
+        if let Some((sx, sy)) = window.get_mouse_pos(MouseMode::Clamp) {
+            select_cube((sx as i32, sy as i32), &mut cubes, (view_x, view_y, view_z));
+        }
+
         for y in 0..VIEW_HEIGHT {
             for z in 0..VIEW_WIDTH {
                 for x in 0..VIEW_WIDTH {
                     let view_index = x + y * VIEW_WIDTH * VIEW_WIDTH + z * VIEW_WIDTH;
                     let cube_index = (x + view_x) + ((y + view_y) * GRID_WIDTH * GRID_WIDTH) + (z + view_z) * GRID_HEIGHT;
+
 
                     let cube_data = cubes[cube_index];
                     let cube_type = cube_data & CUBE_TYPE_MASK;
@@ -105,10 +116,7 @@ fn main() {
                         continue;
                     }
 
-                    let cube = get_screen_coord(get_grid_pos(view_index));
-                    let cube_screen_x = (cube.0 + (SCREEN_WIDTH / 2) as i32) as usize - TILE_HALF_WIDTH;
-                    let cube_screen_y = (cube.1 + (SCREEN_WIDTH / 2) as i32) as usize - TILE_WIDTH;
-                    let cube_screen_y = cube_screen_y - (SCREEN_HEIGHT / 2);
+                    let (cube_screen_x, cube_screen_y) = get_screen_coord(get_grid_pos(view_index));
 
 
                     if let Some(next_x) = get_cube_next_x(cube_index) {
@@ -173,16 +181,6 @@ fn main() {
     }
 }
 
-enum Face {
-    LEFT,
-    RIGHT,
-    TOP
-}
-
-fn render_cube_face(face: Face, cube_index: usize, buffer: &mut [u8]) {
-
-}
-
 fn get_cube_next_x(i: usize) -> Option<usize> {
     if i % GRID_WIDTH == GRID_WIDTH -1 {
         return None
@@ -205,21 +203,55 @@ fn get_cube_above(i: usize) -> Option<usize> {
     Some(i + GRID_WIDTH * GRID_WIDTH)
 }
 
-fn get_screen_coord(world_space: (usize, usize, usize)) -> (i32, i32) {
+fn get_screen_coord(world_space: (usize, usize, usize)) -> (usize, usize) {
     let x = world_space.0 as i32;
     let y = world_space.1 as i32;
     let z = world_space.2 as i32;
 
+    let sx = (x - y) * (TILE_WIDTH / 2) as i32;
+    let sy =  (x + y - 2 * z) * (TILE_HALF_WIDTH / 2) as i32;
     (
-        (x - y) * (TILE_WIDTH / 2) as i32,
-        (x + y - 2 * z) * (TILE_HALF_WIDTH / 2) as i32,
+        (sx + (SCREEN_WIDTH / 2) as i32) as usize,
+        (sy + (SCREEN_HEIGHT / 2) as i32) as usize - SCREEN_Y_OFFSET,
     )
+}
+
+fn select_cube(screen_space: (i32, i32), cubes: &mut Vec<u32>, view_point: (usize, usize, usize)) -> (usize, usize, usize) {
+
+    let sx = screen_space.0 - SCREEN_WIDTH as i32 / 2;
+    let sy = screen_space.1 - SCREEN_HEIGHT as i32 / 2;
+
+    let a = sx / TILE_WIDTH as i32;
+    let b = sy / TILE_HALF_WIDTH as i32;
+    let z = view_point.2 as i32;
+
+    let x = (a + b + 2 * z) / 2;
+    let y = (b - a + 2 * z) / 2;
+
+    if (x < 0 || y < 0) {
+        return (0, 0, 0);
+    }
+    let start_cube = (x as usize, y as usize, z as usize);
+    //println!("{:?}", start_cube);
+    for i in 0..5 {
+        if (i > start_cube.0 || i > start_cube.1 || i > start_cube.2) {
+            break;
+        }
+        let pos = (start_cube.0 - i + view_point.0, start_cube.1 - i + view_point.1, start_cube.2 - i + view_point.2);
+        if (get_vector_pos(pos)) < cubes.len() {
+            println!("{:?}", pos);
+            cubes[get_vector_pos(pos)] = EMPTY_CUBE;
+            return (pos.0 as usize, pos.1 as usize, pos.2 as usize);
+        }
+        //println!("{:?}", pos);
+    }
+    (0, 0, 0)
 }
 
 fn get_grid_pos(n: usize) -> (usize, usize, usize) {
     let x = n % VIEW_WIDTH;
-    let y = (n / (VIEW_WIDTH)) % VIEW_WIDTH;
-    let z = n / (VIEW_WIDTH * VIEW_WIDTH);
+    let y = n / (VIEW_WIDTH * VIEW_WIDTH);
+    let z = (n / (VIEW_WIDTH)) % VIEW_WIDTH;
 
     (x, y, z)
 }
