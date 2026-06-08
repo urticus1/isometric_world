@@ -5,7 +5,7 @@ const RIGHT_FACE_PIXELS: [(usize, usize); 156] = [(23, 6), (22, 6), (23, 7), (22
 const TOP_FACE_PIXELS: [(usize, usize); 144] = [(10, 0), (11, 0), (12, 0), (13, 0), (8, 1), (9, 1), (10, 1), (11, 1), (12, 1), (13, 1), (14, 1), (15, 1), (6, 2), (7, 2), (8, 2), (9, 2), (10, 2), (11, 2), (12, 2), (13, 2), (14, 2), (15, 2), (16, 2), (17, 2), (4, 3), (5, 3), (6, 3), (7, 3), (8, 3), (9, 3), (10, 3), (11, 3), (12, 3), (13, 3), (14, 3), (15, 3), (16, 3), (17, 3), (18, 3), (19, 3), (2, 4), (3, 4), (4, 4), (5, 4), (6, 4), (7, 4), (8, 4), (9, 4), (10, 4), (11, 4), (12, 4), (13, 4), (14, 4), (15, 4), (16, 4), (17, 4), (18, 4), (19, 4), (20, 4), (21, 4), (0, 5), (1, 5), (2, 5), (3, 5), (4, 5), (5, 5), (6, 5), (7, 5), (8, 5), (9, 5), (10, 5), (11, 5), (12, 5), (13, 5), (14, 5), (15, 5), (16, 5), (17, 5), (18, 5), (19, 5), (20, 5), (21, 5), (22, 5), (23, 5), (2, 6), (3, 6), (4, 6), (5, 6), (6, 6), (7, 6), (8, 6), (9, 6), (10, 6), (11, 6), (12, 6), (13, 6), (14, 6), (15, 6), (16, 6), (17, 6), (18, 6), (19, 6), (20, 6), (21, 6), (4, 7), (5, 7), (6, 7), (7, 7), (8, 7), (9, 7), (10, 7), (11, 7), (12, 7), (13, 7), (14, 7), (15, 7), (16, 7), (17, 7), (18, 7), (19, 7), (6, 8), (7, 8), (8, 8), (9, 8), (10, 8), (11, 8), (12, 8), (13, 8), (14, 8), (15, 8), (16, 8), (17, 8), (8, 9), (9, 9), (10, 9), (11, 9), (12, 9), (13, 9), (14, 9), (15, 9), (10, 10), (11, 10), (12, 10), (13, 10)];
 
 
-pub fn draw_left_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>) {
+pub fn draw_left_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, highlight_colour: u32) {
     for (x,y) in LEFT_FACE_PIXELS {
         let value = sprite.pixels[x + y * TILE_WIDTH];
         if value & (0b11111111u8 as u32) << 24 == 0 {
@@ -13,12 +13,12 @@ pub fn draw_left_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut 
         }
         let pixel = (screen_pos.0 + SCREEN_WIDTH * screen_pos.1) + x + y * SCREEN_WIDTH;
         if (pixel < buffer.len()) {
-            buffer[pixel] = value
+            buffer[pixel] = value.saturating_add(highlight_colour)
         }
     }
 }
 
-pub fn draw_top_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>) {
+pub fn draw_top_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, highlight_colour: u32) {
     for (x,y) in TOP_FACE_PIXELS {
         let value = sprite.pixels[x + y * TILE_WIDTH];
         if value & (0b11111111u8 as u32) << 24 == 0 {
@@ -26,12 +26,12 @@ pub fn draw_top_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut V
         }
         let pixel = (screen_pos.0 + SCREEN_WIDTH * screen_pos.1) + x + y * SCREEN_WIDTH;
         if (pixel < buffer.len()) {
-            buffer[pixel] = value
+            buffer[pixel] =  value.saturating_add(highlight_colour)
         }
     }
 }
 
-pub fn draw_right_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>) {
+pub fn draw_right_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, highlight_colour: u32) {
     for (x,y) in RIGHT_FACE_PIXELS {
         let value = sprite.pixels[x + y * TILE_WIDTH];
         if value & (0b11111111u8 as u32) << 24 == 0 {
@@ -39,7 +39,7 @@ pub fn draw_right_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut
         }
         let pixel = (screen_pos.0 + SCREEN_WIDTH * screen_pos.1) + x + y * SCREEN_WIDTH;
         if (pixel < buffer.len()) {
-            buffer[pixel] = value
+            buffer[pixel] = value.saturating_add(highlight_colour)
         }
     }
 }

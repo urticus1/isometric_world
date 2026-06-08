@@ -1,12 +1,17 @@
 mod render;
+mod agents;
+mod grid;
 
 use std::path::Path;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 use image::{open, Frame};
 use minifb::{Key, MouseMode, Window, WindowOptions};
+use crate::agents::find_path;
+use crate::AgentTask::Move;
+use crate::grid::{get_cube_above, get_cube_next_x, get_cube_next_y, get_grid_pos, get_vector_pos, move_cube};
 use crate::render::{draw_left_face, draw_right_face, draw_sprite, draw_top_face};
 
 const SCREEN_WIDTH: usize = 2000;
@@ -32,13 +37,30 @@ const TOP_FACE_CUBE_MASK: u64 = CUBE_TYPE_MASK << 24;
 
 const EMPTY_CUBE: u64 = 255;
 
-fn main() {
+enum Event {
+    Move{
+        from: (usize, usize, usize),
+        to: (usize, usize, usize),
+    },
+
+}
+
+enum AgentEvent {
+    AgentAddTask {
+        task: AgentTask,
+        agent: usize
+    }
+}
+
+#[tokio::main(name = "my-runtime")]
+async fn main() {
     let stone = Sprite::new("resources/24/stone.png");
     let mud = Sprite::new("resources/24/mud.png");
     let grass = Sprite::new("resources/24/grass.png");
     let blank = Sprite::new("resources/24/blank.png");
     let floor = Sprite::new("resources/24/floor.png");
     let man = Sprite::new("resources/24/man1.png");
+    let select_cube = Sprite::new("resources/24/select_cube.png");
 
 
     let man1 = Sprite::new("resources/24/man/animations/ploughing/man_ploughing1.png");
@@ -51,58 +73,141 @@ fn main() {
     let man8 = Sprite::new("resources/24/man/animations/ploughing/man_ploughing8.png");
     let man9 = Sprite::new("resources/24/man/animations/ploughing/man_ploughing9.png");
 
+    let man_r_ne1 = Sprite::new("resources/24/man/animations/running/man_running_ne1.png");
+    let man_r_ne2 = Sprite::new("resources/24/man/animations/running/man_running_ne2.png");
+    let man_r_ne3 = Sprite::new("resources/24/man/animations/running/man_running_ne3.png");
+    let man_r_ne4 = Sprite::new("resources/24/man/animations/running/man_running_ne4.png");
+    let man_r_ne5 = Sprite::new("resources/24/man/animations/running/man_running_ne5.png");
+    let man_r_ne6 = Sprite::new("resources/24/man/animations/running/man_running_ne6.png");
+
+    let man_r_nw1 = Sprite::new("resources/24/man/animations/running/man_running_nw1.png");
+    let man_r_nw2 = Sprite::new("resources/24/man/animations/running/man_running_nw2.png");
+    let man_r_nw3 = Sprite::new("resources/24/man/animations/running/man_running_nw3.png");
+    let man_r_nw4 = Sprite::new("resources/24/man/animations/running/man_running_nw4.png");
+    let man_r_nw5 = Sprite::new("resources/24/man/animations/running/man_running_nw5.png");
+    let man_r_nw6 = Sprite::new("resources/24/man/animations/running/man_running_nw6.png");
+
+    let man_r_sw1 = Sprite::new("resources/24/man/animations/running/man_running_sw1.png");
+    let man_r_sw2 = Sprite::new("resources/24/man/animations/running/man_running_sw2.png");
+    let man_r_sw3 = Sprite::new("resources/24/man/animations/running/man_running_sw3.png");
+    let man_r_sw4 = Sprite::new("resources/24/man/animations/running/man_running_sw4.png");
+    let man_r_sw5 = Sprite::new("resources/24/man/animations/running/man_running_sw5.png");
+    let man_r_sw6 = Sprite::new("resources/24/man/animations/running/man_running_sw6.png");
+    
+    let man_r_se1 = Sprite::new("resources/24/man/animations/running/man_running_se1.png");
+    let man_r_se2 = Sprite::new("resources/24/man/animations/running/man_running_se2.png");
+    let man_r_se3 = Sprite::new("resources/24/man/animations/running/man_running_se3.png");
+    let man_r_se4 = Sprite::new("resources/24/man/animations/running/man_running_se4.png");
+    let man_r_se5 = Sprite::new("resources/24/man/animations/running/man_running_se5.png");
+    let man_r_se6 = Sprite::new("resources/24/man/animations/running/man_running_se6.png");
+
 
     let sprites = vec![stone, mud, grass, blank, floor, man];
 
-    let mut cubes = vec![0u64; GRID_HEIGHT * GRID_WIDTH * GRID_WIDTH];
+    let mut grid =prepare_grid();
 
-    for i in 0..GRID_WIDTH {
-        for j in 0..GRID_WIDTH {
-
-            cubes[get_vector_pos((i,j , GRID_HEIGHT - 1))] = EMPTY_CUBE;
-            cubes[get_vector_pos((i,j,GRID_HEIGHT - 2))] = EMPTY_CUBE;
-            cubes[get_vector_pos((i,j,GRID_HEIGHT - 3))] = EMPTY_CUBE;
-            cubes[get_vector_pos((i,j,GRID_HEIGHT - 4))] = EMPTY_CUBE;
-            cubes[get_vector_pos((i,j,GRID_HEIGHT - 5))] = 2;// + (4 << 24);
-            cubes[get_vector_pos((i,j,GRID_HEIGHT - 6))] = 2;
-            cubes[get_vector_pos((i,j,GRID_HEIGHT - 7))] = 1;
-            cubes[get_vector_pos((i,j,GRID_HEIGHT - 8))] = 1;
-        }
-    }
-
-    cubes[get_vector_pos((GRID_WIDTH-1, GRID_HEIGHT - 1,GRID_WIDTH-1))] = AGENT_TYPE_MASK;
-
-    let plough_animation = Animation {
+    let plough_animation = Arc::new(Animation {
         frames: vec![man1, man2, man3, man4, man5, man6, man7, man8, man9],
         name: "ploughing".to_string(),
-    };
+    });
+
+
+    let run_animation_ne = Arc::new(Animation {
+        frames: vec![man_r_ne1, man_r_ne2, man_r_ne3, man_r_ne4, man_r_ne5, man_r_ne6],
+        name: "running_ne".to_string(),
+    });
+    let run_animation_nw = Arc::new(Animation {
+        frames: vec![man_r_nw1, man_r_nw2, man_r_nw3, man_r_nw4, man_r_nw5, man_r_nw6],
+        name: "running_nw".to_string(),
+    });
+    let run_animation_sw = Arc::new(Animation {
+        frames: vec![man_r_sw1, man_r_sw2, man_r_sw3, man_r_sw4, man_r_sw5, man_r_sw6],
+        name: "running_sw".to_string(),
+    });
+    let run_animation_se = Arc::new(Animation {
+        frames: vec![man_r_se1, man_r_se2, man_r_se3, man_r_se4, man_r_se5, man_r_se6],
+        name: "running_se".to_string(),
+    });
+
+    let path = find_path((GRID_WIDTH-1,GRID_WIDTH-1,GRID_HEIGHT-1), (GRID_WIDTH-11,GRID_WIDTH-21,GRID_HEIGHT-1), &grid);
 
     let mut man = Agent {
-        animation: plough_animation,
-        position: (0,0,0),
+        animation: Arc::clone(&plough_animation),
+        position: (GRID_WIDTH-1,GRID_WIDTH-1,GRID_HEIGHT-1),
         name: "man".to_string(),
-        animation_state: 0
+        animation_state: 0,
+        task: Some(Move(path)),
     };
 
-    let epicentre= (GRID_WIDTH / 2, GRID_HEIGHT -1, GRID_WIDTH / 2);
 
-    for i in 0..GRID_WIDTH {
-        for j in 0..GRID_HEIGHT {
-            for k in 0..GRID_WIDTH {
-                if (i as i32 - epicentre.0 as i32).pow(2) + (j as i32 - epicentre.1 as i32).pow(2) + (k as i32 - epicentre.2 as i32).pow(2) < 60 {
-                    cubes[get_vector_pos((i,j,k))] = EMPTY_CUBE;
-                }
-            }
-        }
-    }
 
+    let (tx, rx) = mpsc::channel();
+    let (game_events, game_events_receiver) = mpsc::channel();
     let agents: Arc<Mutex<Vec<Agent>>> = Arc::new(Mutex::new(vec![man]));
     let agent_clone = Arc::clone(&agents);
     let agent_loop = thread::spawn(move || {
         loop {
+
             {
                 let mut mut_agents =  agent_clone.lock().unwrap();
+                match game_events_receiver.try_recv() {
+                    Ok(ev) => {
+                        match ev {
+                            AgentEvent::AgentAddTask { agent, task } => {
+                                println!("got task");
+                                mut_agents[agent].task = Some(task);
+                            },
+                            _ =>{}
+                        }
+
+                    },
+                    Err(_) => {
+                        println!("Agent event channel closed");
+                    },
+                }
                 for mut agent in mut_agents.iter_mut() {
+                    match &mut agent.task {
+                        Some(task) => {
+                            match task {
+                                AgentTask::Move(path) => {
+                                    if path.is_empty() {
+                                        agent.task = None;
+                                    }
+                                    else {
+                                        let next= path.pop().unwrap();
+                                        let x_dir = next.0 as i8 - agent.position.0 as i8;
+                                        let y_dir = next.1 as i8 - agent.position.1 as i8;
+                                        if x_dir < 0 {
+                                            if y_dir < 0 {
+                                                agent.animation = Arc::clone(&run_animation_sw);
+                                            }
+                                            else {
+                                                agent.animation = Arc::clone(&run_animation_nw);
+                                            }
+                                        }
+                                        else {
+                                            if y_dir < 0 {
+                                                agent.animation = Arc::clone(&run_animation_ne);
+                                            }
+                                            else {
+                                                agent.animation = Arc::clone(&run_animation_se);
+                                            }
+                                        }
+                                        tx.send(Event::Move {
+                                            from: agent.position,
+                                            to: next,
+                                        });
+                                        agent.position = next;
+
+                                    }
+                                }
+                            }
+                        },
+                        None => {
+                            agent.animation = Arc::clone(&plough_animation);
+                        }
+                    }
+
                     if agent.animation_state == agent.animation.frames.len() - 1 {
                         agent.animation_state = 0
                     }
@@ -130,30 +235,78 @@ fn main() {
     let mut view_x = GRID_WIDTH - VIEW_WIDTH;
     let mut view_y = GRID_WIDTH - VIEW_WIDTH;
     let mut view_z = GRID_HEIGHT - VIEW_HEIGHT;
+    let mut selected_cube = (VIEW_WIDTH-1, VIEW_WIDTH-1, VIEW_HEIGHT-1);
+    let mut highlight_coolur = 0;
     while window.is_open() && !window.is_key_down(Key::Escape) {
+        match rx.try_recv() {
+            Ok(ev) => {
+                match ev {
+                    Event::Move{ from, to} => {
+                        move_cube(&mut grid, from, to);
+                    }
+                }
+            },
+            Err(..) => {
+
+            }
+        }
+
+        let scroll_input = window.get_scroll_wheel().map(|scroll| {
+            scroll.1
+        });
+
+        if let Some(scroll_input) = scroll_input {
+            if scroll_input > 0.0 && view_z < GRID_HEIGHT - VIEW_HEIGHT {
+                view_z += 1;
+            }
+            if scroll_input < 0.0 && view_z > 0 {
+                view_z -= 1;
+            }
+        }
 
         let mut buffer = buffer.clone();
-        if window.get_keys().contains(&Key::Right) && view_x < GRID_WIDTH - VIEW_WIDTH {
+        if window.get_keys().contains(&Key::D) && view_x < GRID_WIDTH - VIEW_WIDTH {
             view_x += 1;
         }
-        if window.get_keys().contains(&Key::Left) && view_x > 0 {
+        if window.get_keys().contains(&Key::A) && view_x > 0 {
             view_x -= 1;
         }
-        if window.get_keys().contains(&Key::W) && view_z < GRID_HEIGHT - VIEW_HEIGHT {
-            view_z += 1;
-        }
-        if window.get_keys().contains(&Key::S) && view_z > 0 {
-            view_z -= 1;
-        }
-        if window.get_keys().contains(&Key::Down) && view_y > 0 {
+        if window.get_keys().contains(&Key::S) && view_y > 0 {
             view_y -= 1;
         }
-        if window.get_keys().contains(&Key::Up) && view_y < GRID_WIDTH - VIEW_WIDTH {
+        if window.get_keys().contains(&Key::W) && view_y < GRID_WIDTH - VIEW_WIDTH {
             view_y += 1;
         }
 
+        if window.get_keys().contains(&Key::Right) && selected_cube.0 < VIEW_WIDTH {
+            selected_cube = (selected_cube.0 + 1, selected_cube.1, selected_cube.2);
+        }
+        if window.get_keys().contains(&Key::Left) && selected_cube.0 > 0 {
+            selected_cube = (selected_cube.0 - 1, selected_cube.1, selected_cube.2);
+        }
+        if window.get_keys().contains(&Key::Down) && selected_cube.1 < VIEW_WIDTH {
+            selected_cube = (selected_cube.0, selected_cube.1 + 1, selected_cube.2);
+        }
+        if window.get_keys().contains(&Key::Up) && selected_cube.1 > 0 {
+            selected_cube = (selected_cube.0, selected_cube.1 - 1, selected_cube.2);
+        }
+
+        if window.get_keys().contains(&Key::Space) {
+            {
+                let agents_clone = Arc::clone(&agents);
+                let agents_clone = agents_clone.lock().unwrap();
+                println!("moving");
+                game_events.send(AgentEvent::AgentAddTask {
+                    task: AgentTask::Move(find_path(agents_clone[0].position, (selected_cube.0 + view_x, selected_cube.1 + view_y, selected_cube.2 + view_z), &grid)),
+                    agent: 0
+                });
+            }
+
+
+        }
+
         if let Some((sx, sy)) = window.get_mouse_pos(MouseMode::Clamp) {
-            //select_cube((sx as i32, sy as i32), &mut cubes, (view_x, view_y, view_z));
+           // select_cube((sx as i32, sy as i32), &mut grid, (view_x, view_y, view_z));
         }
 
         let read_only_agents = Arc::clone(&agents);
@@ -162,15 +315,18 @@ fn main() {
                 for x in 0..VIEW_WIDTH {
                     let cube_index = (x + view_x) + ((y + view_y) * GRID_WIDTH) + (z + view_z) * GRID_WIDTH * GRID_WIDTH;
 
-                    let cube_data = cubes[cube_index];
+
+                    let cube_data = grid[cube_index];
                     let cube_type = cube_data & CUBE_TYPE_MASK;
+                    let (cube_screen_x, cube_screen_y) = get_screen_coord((x,y,z));
+                    if (x, y, z) == selected_cube {
+                        draw_sprite((cube_screen_x, cube_screen_y), &select_cube, &mut buffer);
+                        continue;
+                    }
                     if (cube_type == EMPTY_CUBE) {
                         continue;
                     }
-                    if (cubes[get_vector_pos((x + 1, y + 1, z + 1))] & CUBE_TYPE_MASK) == EMPTY_CUBE {
-                        continue;
-                    }
-                    let (cube_screen_x, cube_screen_y) = get_screen_coord((x,y,z));
+
                     if cube_type & AGENT_TYPE_MASK != 0 {
                         let index = (cube_type &! AGENT_TYPE_MASK) as usize;
                         {
@@ -182,12 +338,12 @@ fn main() {
                     else {
                         if let Some(next_x) = get_cube_next_x(cube_index) {
 
-                            if cubes[next_x] & CUBE_TYPE_MASK == EMPTY_CUBE || x == VIEW_WIDTH - 1 {
+                            if grid[next_x] & CUBE_TYPE_MASK == EMPTY_CUBE || grid[next_x] & AGENT_TYPE_MASK != 0 || x == VIEW_WIDTH - 1 {
                                 let mut face = &sprites[cube_type as usize];
                                 if cube_data & RIGHT_FACE_CUBE_MASK != 0 {
                                     face = &sprites[((cube_data & RIGHT_FACE_CUBE_MASK) >> 8) as usize]
                                 }
-                                draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer)
+                                draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
                             }
                         }
                         else {
@@ -195,17 +351,17 @@ fn main() {
                             if cube_data & RIGHT_FACE_CUBE_MASK != 0 {
                                 face = &sprites[((cube_data & RIGHT_FACE_CUBE_MASK) >> 8) as usize]
                             }
-                            draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer)
+                            draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
                         }
 
 
                         if let Some(next_z) = get_cube_next_y(cube_index) {
-                            if cubes[next_z] & CUBE_TYPE_MASK == EMPTY_CUBE || y == VIEW_WIDTH - 1 {
+                            if grid[next_z] & CUBE_TYPE_MASK == EMPTY_CUBE || grid[next_z] & AGENT_TYPE_MASK != 0 || y == VIEW_WIDTH - 1 {
                                 let mut face = &sprites[cube_type as usize];
                                 if (cube_data & LEFT_FACE_CUBE_MASK) != 0 {
                                     face = &sprites[((cube_data & LEFT_FACE_CUBE_MASK) >> 16) as usize];
                                 }
-                                draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer)
+                                draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
                             }
                         }
                         else {
@@ -213,16 +369,16 @@ fn main() {
                             if (cube_data & LEFT_FACE_CUBE_MASK) != 0 {
                                 face = &sprites[((cube_data & LEFT_FACE_CUBE_MASK) >> 16) as usize];
                             }
-                            draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer)
+                            draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
                         }
 
                         if let Some(next_y) = get_cube_above(cube_index) {
-                            if cubes[next_y] & CUBE_TYPE_MASK == EMPTY_CUBE || z == VIEW_HEIGHT - 1 {
+                            if grid[next_y] & CUBE_TYPE_MASK == EMPTY_CUBE || grid[next_y] & AGENT_TYPE_MASK != 0 || z == VIEW_HEIGHT - 1 {
                                 let mut face = &sprites[cube_type as usize];
                                 if cube_data & TOP_FACE_CUBE_MASK != 0 {
                                     face = &sprites[((cube_data & TOP_FACE_CUBE_MASK) >> 24) as usize]
                                 }
-                                draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer)
+                                draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
                             }
                         }
                         else {
@@ -230,7 +386,7 @@ fn main() {
                             if cube_data & TOP_FACE_CUBE_MASK != 0 {
                                 face = &sprites[((cube_data & TOP_FACE_CUBE_MASK) >> 24) as usize]
                             }
-                            draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer)
+                            draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
                         }
                     }
                 }
@@ -243,33 +399,41 @@ fn main() {
     }
 }
 
+fn prepare_grid() -> Vec<u64> {
+    let mut cubes = vec![0u64; GRID_HEIGHT * GRID_WIDTH * GRID_WIDTH];
 
-fn get_cube_next_x(i: usize) -> Option<usize> {
-    if i % GRID_WIDTH == GRID_WIDTH -1 {
-        return None
-    }
-    Some(i + 1)
-}
+    for i in 0..GRID_WIDTH {
+        for j in 0..GRID_WIDTH {
 
-fn get_cube_next_y(i: usize) -> Option<usize> {
-    if i % (GRID_WIDTH * GRID_WIDTH) + GRID_WIDTH >= GRID_WIDTH * GRID_WIDTH {
-        return None
+            cubes[get_vector_pos((i,j,GRID_HEIGHT - 1))] = EMPTY_CUBE;
+            cubes[get_vector_pos((i,j,GRID_HEIGHT - 5))] = 2;// + (4 << 24);
+            cubes[get_vector_pos((i,j,GRID_HEIGHT - 6))] = 2;
+            cubes[get_vector_pos((i,j,GRID_HEIGHT - 7))] = 1;
+            cubes[get_vector_pos((i,j,GRID_HEIGHT - 8))] = 1;
+        }
     }
-    Some(i + GRID_WIDTH)
-}
 
-fn get_cube_above(i: usize) -> Option<usize> {
-    let val = i + GRID_WIDTH * GRID_WIDTH;
-    if val >= GRID_HEIGHT * GRID_WIDTH * GRID_WIDTH {
-        return None;
+    cubes[get_vector_pos((GRID_WIDTH-1, GRID_WIDTH - 1,GRID_HEIGHT-1))] = AGENT_TYPE_MASK;
+
+    let epicentre= (GRID_WIDTH / 2, GRID_WIDTH -1, GRID_HEIGHT / 2);
+
+    for i in 0..GRID_WIDTH {
+        for j in 0..GRID_WIDTH {
+            for k in 0..GRID_HEIGHT {
+                if (i as i32 - epicentre.0 as i32).pow(2) + (j as i32 - epicentre.1 as i32).pow(2) + (k as i32 - epicentre.2 as i32).pow(2) < 60 {
+                    cubes[get_vector_pos((i,j,k))] = EMPTY_CUBE;
+                }
+            }
+        }
     }
-    Some(i + GRID_WIDTH * GRID_WIDTH)
+    cubes
 }
 
 fn get_screen_coord(world_space: (usize, usize, usize)) -> (usize, usize) {
     let x = world_space.0 as i32;
     let y = world_space.1 as i32;
     let z = world_space.2 as i32;
+
 
     let sx = (x - y) * (TILE_WIDTH / 2) as i32;
     let sy =  (x + y - 2 * z) * (TILE_HALF_WIDTH / 2) as i32;
@@ -284,9 +448,11 @@ fn select_cube(screen_space: (i32, i32), cubes: &mut Vec<u64>, view_point: (usiz
     let sx = screen_space.0 - SCREEN_WIDTH as i32 / 2;
     let sy = screen_space.1 - (SCREEN_HEIGHT as i32 / 2) + SCREEN_Y_OFFSET as i32;
 
-    let a = sx / TILE_WIDTH as i32;
-    let b = sy / TILE_HALF_WIDTH as i32;
-    let z = view_point.2 as i32 + VIEW_HEIGHT as i32;
+    println!("screen space {:?}, {:?}", sx, sy);
+
+    let a = sx / (TILE_WIDTH/2) as i32;
+    let b = sy / (TILE_HALF_WIDTH/2) as i32;
+    let z = view_point.2 as i32 + (VIEW_HEIGHT - 1) as i32;
 
     let x = (a + b + 2 * z) / 2;
     let y = (b - a + 2 * z) / 2;
@@ -294,31 +460,34 @@ fn select_cube(screen_space: (i32, i32), cubes: &mut Vec<u64>, view_point: (usiz
     if (x < 0 || y < 0) {
         return (0, 0, 0);
     }
-    let start_cube = (x as usize, y as usize, z as usize);
-    for i in 0..5 {
-        if (i > start_cube.0 || i > start_cube.1 || i > start_cube.2) {
-            break;
+    for i in 0..VIEW_HEIGHT as i32 {
+        let px = x - i;
+        let py = y - i;
+        let pz = z - i;
+
+        if px < 0 || py < 0 || pz < 0 {
+            continue;
         }
-        let pos = (start_cube.0 - i + view_point.0, start_cube.1 + i + view_point.1, start_cube.2 - i + view_point.2);
-        if (get_vector_pos(pos)) < cubes.len() {
-            cubes[get_vector_pos(pos)] = EMPTY_CUBE;
-            return (pos.0 as usize, pos.1 as usize, pos.2 as usize);
+
+        let pos = (px as usize, py as usize, pz as usize);
+        let index = get_vector_pos(pos);
+        if (index < 0 || index >= cubes.len()) {
+            return (0, 0, 0);
+        }
+
+        if cubes[get_vector_pos(pos)] != EMPTY_CUBE {
+            let index = get_vector_pos(pos);
+            if index < 0 || index >= cubes.len() {
+                return (0, 0, 0);
+            }
+            cubes[get_vector_pos(pos)] = 3;
+            println!("hovered cube {:?}", pos);
+            return (0, 0, 0);
         }
     }
     (0, 0, 0)
 }
 
-fn get_grid_pos(n: usize) -> (usize, usize, usize) {
-    let x = n % VIEW_WIDTH;
-    let y = (n / (VIEW_WIDTH)) % VIEW_WIDTH;
-    let z = n / (VIEW_WIDTH * VIEW_WIDTH);
-
-    (x, y, z)
-}
-
-fn get_vector_pos(world_space: (usize, usize, usize)) -> usize {
-    world_space.0 + world_space.1 * GRID_WIDTH + world_space.2 * GRID_WIDTH * GRID_WIDTH
-}
 
 struct Sprite {
     pub pixels: [u32; TILE_WIDTH * TILE_WIDTH],
@@ -341,9 +510,14 @@ impl Sprite {
 
 struct Agent {
     name: String,
-    animation:  Animation,
+    animation:  Arc<Animation>,
     animation_state: usize,
     position: (usize, usize, usize),
+    task: Option<AgentTask>
+}
+
+enum AgentTask {
+    Move(Vec<(usize, usize, usize)>),
 }
 
 struct Animation {
