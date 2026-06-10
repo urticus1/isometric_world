@@ -1,9 +1,11 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::rc::Rc;
-use crate::GRID_WIDTH;
+use std::sync::Arc;
+use crate::{Sprite, CUBE_TYPE_MASK, EMPTY_CUBE, GRID_WIDTH};
+use crate::grid::Grid;
 
-pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid: &Vec<u64>) -> Vec<(usize, usize, usize)> {
+pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid: &Grid) -> Vec<(usize, usize, usize)> {
     println!("{:?} -> {:?}", start, end);
     let mut closed: HashMap<(usize, usize, usize), Rc<Node>> = HashMap::new();
     let mut nodes: HashMap<(usize, usize, usize), Rc<Node>> = HashMap::new();
@@ -22,7 +24,7 @@ pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid:
     while !open.is_empty() {
         let current = open.pop().unwrap();
         //path.push(current.position);
-        for neighbour in get_neighbours(current.position) {
+        for neighbour in get_neighbours(current.position, grid) {
             if closed.contains_key(&neighbour) {
                 continue;
             }
@@ -105,20 +107,36 @@ impl PartialOrd for Node {
     }
 }
 
-fn get_neighbours(position: (usize, usize, usize)) -> Vec<(usize, usize, usize)> {
+fn get_neighbours(position: (usize, usize, usize), grid: &Grid) -> Vec<(usize, usize, usize)> {
     let mut neighbours: Vec<(usize, usize, usize)> = Vec::new();
-    if (position.0 > 0) {
+    if position.0 > 0 && grid[grid.get_vector_pos((position.0 - 1, position.1, position.2))].is_walkable() {
         neighbours.push((position.0 - 1, position.1, position.2));
     }
-    if (position.0 < GRID_WIDTH - 1) {
+    if position.0 < GRID_WIDTH - 1 && grid[grid.get_vector_pos((position.0 + 1, position.1, position.2))].is_walkable() {
         neighbours.push((position.0 + 1, position.1, position.2));
     }
-    if (position.1 > 0) {
+    if position.1 > 0 && grid[grid.get_vector_pos((position.0, position.1 - 1, position.2))].is_walkable() {
         neighbours.push((position.0, position.1 - 1, position.2));
     }
-    if (position.1 < GRID_WIDTH - 1) {
+    if position.1 < GRID_WIDTH - 1 && grid[grid.get_vector_pos((position.0 , position.1 + 1 , position.2))].is_walkable() {
         neighbours.push((position.0, position.1 + 1, position.2));
     }
     neighbours
 }
 
+pub struct Agent {
+    pub name: String,
+    pub animation:  Arc<Animation>,
+    pub animation_state: usize,
+    pub position: (usize, usize, usize),
+    pub task: Option<AgentTask>
+}
+
+pub enum AgentTask {
+    Move(Vec<(usize, usize, usize)>),
+}
+
+pub struct Animation {
+    pub frames: Vec<Sprite>,
+    pub name: String
+}

@@ -9,9 +9,8 @@ use std::thread::sleep;
 use std::time::Duration;
 use image::{open, Frame};
 use minifb::{Key, MouseMode, Window, WindowOptions};
-use crate::agents::find_path;
-use crate::AgentTask::Move;
-use crate::grid::{get_cube_above, get_cube_next_x, get_cube_next_y, get_grid_pos, get_vector_pos, move_cube};
+use crate::agents::{find_path, Agent, AgentTask, Animation};
+use crate::grid::{Cube, Grid};
 use crate::render::{draw_left_face, draw_right_face, draw_sprite, draw_top_face};
 
 const SCREEN_WIDTH: usize = 2000;
@@ -35,7 +34,7 @@ const RIGHT_FACE_CUBE_MASK: u64 = CUBE_TYPE_MASK << 8;
 const LEFT_FACE_CUBE_MASK: u64 = CUBE_TYPE_MASK << 16;
 const TOP_FACE_CUBE_MASK: u64 = CUBE_TYPE_MASK << 24;
 
-const EMPTY_CUBE: u64 = 255;
+const EMPTY_CUBE: u8 = 255;
 
 enum Event {
     Move{
@@ -133,13 +132,11 @@ async fn main() {
 
     let mut man = Agent {
         animation: Arc::clone(&plough_animation),
-        position: (GRID_WIDTH-1,GRID_WIDTH-1,GRID_HEIGHT-1),
+        position: (GRID_WIDTH-1,GRID_WIDTH-1,GRID_HEIGHT-4),
         name: "man".to_string(),
         animation_state: 0,
-        task: Some(Move(path)),
+        task: Some(AgentTask::Move(path)),
     };
-
-
 
     let (tx, rx) = mpsc::channel();
     let (game_events, game_events_receiver) = mpsc::channel();
@@ -162,7 +159,6 @@ async fn main() {
 
                     },
                     Err(_) => {
-                        println!("Agent event channel closed");
                     },
                 }
                 for mut agent in mut_agents.iter_mut() {
@@ -178,20 +174,16 @@ async fn main() {
                                         let x_dir = next.0 as i8 - agent.position.0 as i8;
                                         let y_dir = next.1 as i8 - agent.position.1 as i8;
                                         if x_dir < 0 {
-                                            if y_dir < 0 {
-                                                agent.animation = Arc::clone(&run_animation_sw);
-                                            }
-                                            else {
-                                                agent.animation = Arc::clone(&run_animation_nw);
-                                            }
+                                            agent.animation = Arc::clone(&run_animation_nw);
+                                        }
+                                        else if x_dir > 0 {
+                                            agent.animation = Arc::clone(&run_animation_se);
+                                        }
+                                        else if y_dir < 0 {
+                                            agent.animation = Arc::clone(&run_animation_ne);
                                         }
                                         else {
-                                            if y_dir < 0 {
-                                                agent.animation = Arc::clone(&run_animation_ne);
-                                            }
-                                            else {
-                                                agent.animation = Arc::clone(&run_animation_se);
-                                            }
+                                            agent.animation = Arc::clone(&run_animation_sw);
                                         }
                                         tx.send(Event::Move {
                                             from: agent.position,
@@ -242,7 +234,7 @@ async fn main() {
             Ok(ev) => {
                 match ev {
                     Event::Move{ from, to} => {
-                        move_cube(&mut grid, from, to);
+                        grid.move_cube(from, to);
                     }
                 }
             },
@@ -315,80 +307,57 @@ async fn main() {
                 for x in 0..VIEW_WIDTH {
                     let cube_index = (x + view_x) + ((y + view_y) * GRID_WIDTH) + (z + view_z) * GRID_WIDTH * GRID_WIDTH;
 
-
-                    let cube_data = grid[cube_index];
-                    let cube_type = cube_data & CUBE_TYPE_MASK;
                     let (cube_screen_x, cube_screen_y) = get_screen_coord((x,y,z));
                     if (x, y, z) == selected_cube {
                         draw_sprite((cube_screen_x, cube_screen_y), &select_cube, &mut buffer);
                         continue;
                     }
-                    if (cube_type == EMPTY_CUBE) {
+
+                    let cube_data = grid[cube_index];
+                    if (cube_data.cube_type == EMPTY_CUBE && !cube_data.agent.is_some()) {
                         continue;
                     }
 
-                    if cube_type & AGENT_TYPE_MASK != 0 {
-                        let index = (cube_type &! AGENT_TYPE_MASK) as usize;
-                        {
-                            let agents_copy = read_only_agents.lock().unwrap();
-                            let agent: &Agent = &agents_copy[index];
-                            draw_sprite((cube_screen_x, cube_screen_y), &agent.animation.frames[agent.animation_state], &mut buffer)
+                    if let Some(agent) = cube_data.agent {
+                        let agents_copy = read_only_agents.lock().unwrap();
+                        let agent: &Agent = &agents_copy[agent as usize];
+                        draw_sprite((cube_screen_x, cube_screen_y), &agent.animation.frames[agent.animation_state], &mut buffer);
+                        continue;
+                    }
+
+                    if let Some(next_x) = grid.get_cube_next_x(cube_index) {
+                        if next_x.is_transparent() || x == VIEW_WIDTH - 1 {
+                            let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
+                            draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
                         }
                     }
                     else {
-                        if let Some(next_x) = get_cube_next_x(cube_index) {
+                        let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
+                        draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
+                    }
 
-                            if grid[next_x] & CUBE_TYPE_MASK == EMPTY_CUBE || grid[next_x] & AGENT_TYPE_MASK != 0 || x == VIEW_WIDTH - 1 {
-                                let mut face = &sprites[cube_type as usize];
-                                if cube_data & RIGHT_FACE_CUBE_MASK != 0 {
-                                    face = &sprites[((cube_data & RIGHT_FACE_CUBE_MASK) >> 8) as usize]
-                                }
-                                draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
-                            }
-                        }
-                        else {
-                            let mut face = &sprites[cube_type as usize];
-                            if cube_data & RIGHT_FACE_CUBE_MASK != 0 {
-                                face = &sprites[((cube_data & RIGHT_FACE_CUBE_MASK) >> 8) as usize]
-                            }
-                            draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
-                        }
-
-
-                        if let Some(next_z) = get_cube_next_y(cube_index) {
-                            if grid[next_z] & CUBE_TYPE_MASK == EMPTY_CUBE || grid[next_z] & AGENT_TYPE_MASK != 0 || y == VIEW_WIDTH - 1 {
-                                let mut face = &sprites[cube_type as usize];
-                                if (cube_data & LEFT_FACE_CUBE_MASK) != 0 {
-                                    face = &sprites[((cube_data & LEFT_FACE_CUBE_MASK) >> 16) as usize];
-                                }
-                                draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
-                            }
-                        }
-                        else {
-                            let mut face = &sprites[cube_type as usize];
-                            if (cube_data & LEFT_FACE_CUBE_MASK) != 0 {
-                                face = &sprites[((cube_data & LEFT_FACE_CUBE_MASK) >> 16) as usize];
-                            }
+                    if let Some(next_y) = grid.get_cube_next_y(cube_index) {
+                        if next_y.is_transparent() || y == VIEW_WIDTH - 1 {
+                            let face = cube_data.cube_y_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
                             draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
                         }
+                    }
+                    else {
+                        let face = cube_data.cube_y_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
+                        draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
+                    }
 
-                        if let Some(next_y) = get_cube_above(cube_index) {
-                            if grid[next_y] & CUBE_TYPE_MASK == EMPTY_CUBE || grid[next_y] & AGENT_TYPE_MASK != 0 || z == VIEW_HEIGHT - 1 {
-                                let mut face = &sprites[cube_type as usize];
-                                if cube_data & TOP_FACE_CUBE_MASK != 0 {
-                                    face = &sprites[((cube_data & TOP_FACE_CUBE_MASK) >> 24) as usize]
-                                }
-                                draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
-                            }
-                        }
-                        else {
-                            let mut face = &sprites[cube_type as usize];
-                            if cube_data & TOP_FACE_CUBE_MASK != 0 {
-                                face = &sprites[((cube_data & TOP_FACE_CUBE_MASK) >> 24) as usize]
-                            }
+                    if let Some(next_z) = grid.get_cube_above(cube_index) {
+                        if next_z.is_transparent() || z == VIEW_HEIGHT - 1 {
+                            let face = cube_data.cube_z_face.map_or(&sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
                             draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
                         }
                     }
+                    else {
+                        let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
+                        draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
+                    }
+
                 }
             }
         }
@@ -399,21 +368,63 @@ async fn main() {
     }
 }
 
-fn prepare_grid() -> Vec<u64> {
-    let mut cubes = vec![0u64; GRID_HEIGHT * GRID_WIDTH * GRID_WIDTH];
+
+/**
+fn draw_cube_face(face: Face, cube: &Cube, cube_index: usize, buffer: &mut [u8], grid: &Grid) {
+    let blocking_cube = match face {
+        Face::X => grid.get_cube_next_x(cube_index),
+        Face::Y => grid.get_cube_next_y(cube_index),
+        Face::Z => grid.get_cube_above(cube_index),
+    };
+    if let Some(blocker) = blocking_cube {
+        !if blocker.is_transparent() {
+            return;
+        }
+    }
+    if grid[next_x].is_transparent() || x == VIEW_WIDTH - 1 {
+            let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x] });
+            draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
+        }
+    }
+    else {
+        let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x] });
+        draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
+    }
+}
+*/
+
+enum Face {
+    X,
+    Y,
+    Z
+}
+
+fn prepare_grid() -> Grid {
+    let mut grid = Grid::new(GRID_WIDTH ,GRID_WIDTH,GRID_HEIGHT);
 
     for i in 0..GRID_WIDTH {
         for j in 0..GRID_WIDTH {
-
-            cubes[get_vector_pos((i,j,GRID_HEIGHT - 1))] = EMPTY_CUBE;
-            cubes[get_vector_pos((i,j,GRID_HEIGHT - 5))] = 2;// + (4 << 24);
-            cubes[get_vector_pos((i,j,GRID_HEIGHT - 6))] = 2;
-            cubes[get_vector_pos((i,j,GRID_HEIGHT - 7))] = 1;
-            cubes[get_vector_pos((i,j,GRID_HEIGHT - 8))] = 1;
+            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 1));
+            grid[index] = Cube::new(EMPTY_CUBE);// + (4 << 24);
+            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 2));
+            grid[index] = Cube::new(EMPTY_CUBE);// + (4 << 24);
+            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 3));
+            grid[index] = Cube::new(EMPTY_CUBE);// + (4 << 24);
+            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 4));
+            grid[index] = Cube::new(EMPTY_CUBE);// + (4 << 24);
+            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 5));
+            grid[index] = Cube::new(2);// + (4 << 24);
+            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 6));
+            grid[index] = Cube::new(2);// + (4 << 24);
+            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 7));
+            grid[index] = Cube::new(1);// + (4 << 24);
+            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 8));
+            grid[index] = Cube::new(1);// + (4 << 24);
         }
     }
 
-    cubes[get_vector_pos((GRID_WIDTH-1, GRID_WIDTH - 1,GRID_HEIGHT-1))] = AGENT_TYPE_MASK;
+    let agent_start_index = grid.get_vector_pos((GRID_WIDTH-1, GRID_WIDTH - 1,GRID_HEIGHT-4));
+    grid[agent_start_index] = Cube::with_agent(0);
 
     let epicentre= (GRID_WIDTH / 2, GRID_WIDTH -1, GRID_HEIGHT / 2);
 
@@ -421,12 +432,13 @@ fn prepare_grid() -> Vec<u64> {
         for j in 0..GRID_WIDTH {
             for k in 0..GRID_HEIGHT {
                 if (i as i32 - epicentre.0 as i32).pow(2) + (j as i32 - epicentre.1 as i32).pow(2) + (k as i32 - epicentre.2 as i32).pow(2) < 60 {
-                    cubes[get_vector_pos((i,j,k))] = EMPTY_CUBE;
+                    let index = grid.get_vector_pos((i,j,k));
+                    grid[index] = Cube::new(EMPTY_CUBE);
                 }
             }
         }
     }
-    cubes
+    grid
 }
 
 fn get_screen_coord(world_space: (usize, usize, usize)) -> (usize, usize) {
@@ -443,7 +455,8 @@ fn get_screen_coord(world_space: (usize, usize, usize)) -> (usize, usize) {
     )
 }
 
-fn select_cube(screen_space: (i32, i32), cubes: &mut Vec<u64>, view_point: (usize, usize, usize)) -> (usize, usize, usize) {
+/**
+fn select_cube(screen_space: (i32, i32), grid: &mut Grid, view_point: (usize, usize, usize)) -> (usize, usize, usize) {
 
     let sx = screen_space.0 - SCREEN_WIDTH as i32 / 2;
     let sy = screen_space.1 - (SCREEN_HEIGHT as i32 / 2) + SCREEN_Y_OFFSET as i32;
@@ -470,23 +483,24 @@ fn select_cube(screen_space: (i32, i32), cubes: &mut Vec<u64>, view_point: (usiz
         }
 
         let pos = (px as usize, py as usize, pz as usize);
-        let index = get_vector_pos(pos);
+        let index = grid.get_vector_pos(pos);
         if (index < 0 || index >= cubes.len()) {
             return (0, 0, 0);
         }
 
-        if cubes[get_vector_pos(pos)] != EMPTY_CUBE {
-            let index = get_vector_pos(pos);
+        if cubes[grid.get_vector_pos(pos)] != EMPTY_CUBE {
+            let index = grid.get_vector_pos(pos);
             if index < 0 || index >= cubes.len() {
                 return (0, 0, 0);
             }
-            cubes[get_vector_pos(pos)] = 3;
+            cubes[grid.get_vector_pos(pos)] = 3;
             println!("hovered cube {:?}", pos);
             return (0, 0, 0);
         }
     }
     (0, 0, 0)
 }
+*/
 
 
 struct Sprite {
@@ -506,21 +520,4 @@ impl Sprite {
             pixels
         }
     }
-}
-
-struct Agent {
-    name: String,
-    animation:  Arc<Animation>,
-    animation_state: usize,
-    position: (usize, usize, usize),
-    task: Option<AgentTask>
-}
-
-enum AgentTask {
-    Move(Vec<(usize, usize, usize)>),
-}
-
-struct Animation {
-    frames: Vec<Sprite>,
-    name: String
 }
