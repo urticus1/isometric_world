@@ -1,10 +1,12 @@
 use std::cmp::PartialEq;
 use std::collections::HashMap;
-use minifb::Key;
-use crate::input::ButtonState::{Held, Pressed};
+use minifb::{Key, MouseButton};
+use crate::input::ButtonState::{Held, Pressed, Released};
 
 pub struct InputBuffer {
     button_states: HashMap<Key, ButtonState>,
+    left_mouse_state: ButtonState,
+    right_mouse_state: ButtonState,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -18,11 +20,13 @@ pub enum ButtonState {
 impl InputBuffer {
     pub fn new() -> InputBuffer {
         InputBuffer {
-            button_states: HashMap::new()
+            button_states: HashMap::new(),
+            left_mouse_state: Released,
+            right_mouse_state: Released,
         }
     }
 
-    pub fn update_button_states(&mut self, keys_down: Vec<Key>) {
+    pub fn update_button_states(&mut self, keys_down: Vec<Key>, left_mouse_down: bool, right_mouse_down: bool) {
         let existing_keys: Vec<Key> = self.button_states.keys().copied().collect();
         for key in  existing_keys {
             if !keys_down.contains(&key) {
@@ -43,6 +47,32 @@ impl InputBuffer {
             else {
                 self.button_states.insert(key, Pressed);
             }
+        }
+
+        if left_mouse_down {
+            if self.left_mouse_state == Pressed {
+                self.left_mouse_state = ButtonState::Held;
+            }
+            else {
+                self.left_mouse_state = ButtonState::Pressed;
+            }
+        }
+        else {
+            self.left_mouse_state = ButtonState::Released;
+        }
+    }
+
+    pub fn left_mouse_pressed(&self) -> bool {
+        match self.left_mouse_state {
+            ButtonState::Pressed => true,
+            _ => false
+        }
+    }
+
+    pub fn right_mouse_pressed(&self) -> bool {
+        match self.right_mouse_state {
+            ButtonState::Pressed => true,
+            _ => false
         }
     }
 

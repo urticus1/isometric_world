@@ -179,5 +179,6 @@ pub enum AgentTask {
     },
     FindPath {
         destination: (usize, usize, usize),
-    }
+    },
+    Plough
 }

@@ -14,8 +14,8 @@ use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 use image::{open, Frame};
-use minifb::{Key, MouseMode, Window, WindowOptions};
-use minifb::Key::K;
+use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
+use minifb::Key::{K, R};
 use crate::agents::{find_path, Agent, AgentCoroutine, AgentEvent, AgentTask};
 use crate::agents::AgentEvent::AgentAddTask;
 use crate::animation::{Animation, AnimationPool};
@@ -116,6 +116,9 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
 
                     completed = true;
                 }
+
+            }
+            AgentTask::Plough => {
 
             }
         }
@@ -227,11 +230,24 @@ fn main() {
         id: 0
     };
 
+    let mut man2 = Agent {
+        animation: worker_animations.animations["ploughing"].clone(),
+        position: (GRID_WIDTH-5, GRID_WIDTH-5, GRID_HEIGHT-4),
+        animation_pool: Arc::clone(&worker_animations),
+        name: "man2".to_string(),
+        animation_state: 0,
+        destination: None,
+        tasks: vec![],
+        active_task: None,
+        id: 1
+    };
+
     grid.lock().unwrap().spawn_agent(&mut man);
+    grid.lock().unwrap().spawn_agent(&mut man2);
 
 
     let (game_events, game_events_receiver) = mpsc::channel();
-    let agents: Arc<Mutex<Vec<Agent>>> = Arc::new(Mutex::new(vec![man]));
+    let agents: Arc<Mutex<Vec<Agent>>> = Arc::new(Mutex::new(vec![man, man2]));
     let agent_clone = Arc::clone(&agents);
     let grid_clone = Arc::clone(&grid);
 
@@ -307,7 +323,7 @@ fn main() {
     let mut view_x = GRID_WIDTH - VIEW_WIDTH;
     let mut view_y = GRID_WIDTH - VIEW_WIDTH;
     let mut view_z = GRID_HEIGHT - VIEW_HEIGHT;
-    let mut selected_cube = (VIEW_WIDTH-1, VIEW_WIDTH-1, VIEW_HEIGHT-1);
+    let mut selected_cube: Option<(usize, usize, usize)> = None;
     let mut highlight_coolur = 0;
     let read_only_grid = Arc::clone(&grid);
 
@@ -322,7 +338,7 @@ fn main() {
             scroll.1
         });
 
-        input_buffer.update_button_states(window.get_keys());
+        input_buffer.update_button_states(window.get_keys(), window.get_mouse_down(MouseButton::Left), window.get_mouse_down(MouseButton::Right));
 
         if let Some(scroll_input) = scroll_input {
             if scroll_input > 0.0 && view_z < GRID_HEIGHT - VIEW_HEIGHT {
@@ -347,30 +363,31 @@ fn main() {
             view_y += 1;
         }
 
-        if  input_buffer.button_pressed(Key::Right) && selected_cube.0 < VIEW_WIDTH {
-            selected_cube = (selected_cube.0 + 1, selected_cube.1, selected_cube.2);
-        }
-        if  input_buffer.button_pressed(Key::Left) && selected_cube.0 > 0 {
-            selected_cube = (selected_cube.0 - 1, selected_cube.1, selected_cube.2);
-        }
-        if  input_buffer.button_pressed(Key::Down) && selected_cube.1 < VIEW_WIDTH {
-            selected_cube = (selected_cube.0, selected_cube.1 + 1, selected_cube.2);
-        }
-        if  input_buffer.button_pressed(Key::Up) && selected_cube.1 > 0 {
-            selected_cube = (selected_cube.0, selected_cube.1 - 1, selected_cube.2);
-        }
-
-        if input_buffer.button_pressed(Key::Space) {
-            {
-                let grid_lock = read_only_grid.lock().unwrap();
-                let cube_data = grid_lock.get_cube((selected_cube.0 + view_x, selected_cube.1 + view_y, selected_cube.2 + view_z));
-                handle_selection(cube_data, &game_events, (selected_cube.0 + view_x, selected_cube.1 + view_y, selected_cube.2 + view_z), &mut selection_state);
+        if let Some(sel) = selected_cube {
+            if  input_buffer.button_pressed(Key::Right) && sel.0 < VIEW_WIDTH {
+                selected_cube = Some((sel.0 + 1, sel.1, sel.2));
             }
-
+            if  input_buffer.button_pressed(Key::Left) && sel.0 > 0 {
+                selected_cube = Some((sel.0 - 1, sel.1, sel.2));
+            }
+            if  input_buffer.button_pressed(Key::Down) && sel.1 < VIEW_WIDTH {
+                selected_cube = Some((sel.0, sel.1 + 1, sel.2));
+            }
+            if  input_buffer.button_pressed(Key::Up) && sel.1 > 0 {
+                selected_cube = Some((sel.0, sel.1 - 1, sel.2));
+            }
+            
+            if input_buffer.button_pressed(Key::Space) || input_buffer.left_mouse_pressed() {
+                {
+                    let grid_lock = read_only_grid.lock().unwrap();
+                    let cube_data = grid_lock.get_cube((sel.0 + view_x, sel.1 + view_y, sel.2 + view_z));
+                    handle_selection(cube_data, &game_events, (sel.0 + view_x, sel.1 + view_y, sel.2 + view_z), &mut selection_state);
+                }
+            }
         }
 
         if let Some((sx, sy)) = window.get_mouse_pos(MouseMode::Clamp) {
-           // select_cube((sx as i32, sy as i32), &mut grid, (view_x, view_y, view_z));
+           selected_cube = select_cube_mouse((sx as i32, sy as i32), &*grid.lock().unwrap(), (view_x, view_y, view_z));
         }
 
         let read_only_agents = Arc::clone(&agents);
@@ -380,10 +397,14 @@ fn main() {
                     let cube_index = (x + view_x) + ((y + view_y) * GRID_WIDTH) + (z + view_z) * GRID_WIDTH * GRID_WIDTH;
 
                     let (cube_screen_x, cube_screen_y) = get_screen_coord((x,y,z));
-                    if (x, y, z) == selected_cube {
-                        draw_sprite((cube_screen_x, cube_screen_y), &select_cube, &mut buffer);
-                        continue;
+
+                    if selected_cube.is_some() {
+                        if (x, y, z) == selected_cube.unwrap() {
+                            draw_sprite((cube_screen_x, cube_screen_y), &select_cube, &mut buffer);
+                            continue;
+                        }
                     }
+
 
                     let cube_data = {
                         let grid = read_only_grid.lock().unwrap();
@@ -460,7 +481,7 @@ fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube
         Some(agent) => {
             game_events.send(AgentAddTask {
                 task: AgentTask::FindPath {
-                    destination: selected_cube,
+                    destination: (selected_cube.0, selected_cube.1, selected_cube.2 + 1),
                 },
                 agent: agent as usize,
             });
@@ -546,7 +567,6 @@ fn get_screen_coord(world_space: (usize, usize, usize)) -> (usize, usize) {
     let y = world_space.1 as i32;
     let z = world_space.2 as i32;
 
-
     let sx = (x - y) * (TILE_WIDTH / 2) as i32;
     let sy =  (x + y - 2 * z) * (TILE_HALF_WIDTH / 2) as i32;
     (
@@ -555,52 +575,37 @@ fn get_screen_coord(world_space: (usize, usize, usize)) -> (usize, usize) {
     )
 }
 
-/**
-fn select_cube(screen_space: (i32, i32), grid: &mut Grid, view_point: (usize, usize, usize)) -> (usize, usize, usize) {
 
-    let sx = screen_space.0 - SCREEN_WIDTH as i32 / 2;
-    let sy = screen_space.1 - (SCREEN_HEIGHT as i32 / 2) + SCREEN_Y_OFFSET as i32;
+fn select_cube_mouse(screen_space: (i32, i32), grid: &Grid, view_point: (usize, usize, usize)) -> Option<(usize, usize, usize)> {
+    let sx = screen_space.0 as f32 - SCREEN_WIDTH as f32 / 2.0 - TILE_HALF_WIDTH as f32;
+    let sy = screen_space.1 as f32 - (SCREEN_HEIGHT as f32 / 2.0) + SCREEN_Y_OFFSET as f32 - TILE_HALF_WIDTH as f32;
 
-    println!("screen space {:?}, {:?}", sx, sy);
+    let a = sx / (TILE_WIDTH / 2) as f32;
+    let b = sy / (TILE_HALF_WIDTH / 2) as f32;
 
-    let a = sx / (TILE_WIDTH/2) as i32;
-    let b = sy / (TILE_HALF_WIDTH/2) as i32;
-    let z = view_point.2 as i32 + (VIEW_HEIGHT - 1) as i32;
+    for z in (0..VIEW_HEIGHT as i32).rev() {
+        let pz = z;
 
-    let x = (a + b + 2 * z) / 2;
-    let y = (b - a + 2 * z) / 2;
+        let x = ((a + b + 2.0 * z as f32) / 2.0).round() as i32;
+        let y = ((b - a + 2.0 * z as f32) / 2.0).round() as i32;
 
-    if (x < 0 || y < 0) {
-        return (0, 0, 0);
-    }
-    for i in 0..VIEW_HEIGHT as i32 {
-        let px = x - i;
-        let py = y - i;
-        let pz = z - i;
-
-        if px < 0 || py < 0 || pz < 0 {
+        if x < 0 || y < 0 || pz < 0 {
             continue;
         }
 
-        let pos = (px as usize, py as usize, pz as usize);
-        let index = grid.get_vector_pos(pos);
-        if (index < 0 || index >= cubes.len()) {
-            return (0, 0, 0);
-        }
+        let pos = (x as usize, y as usize, pz as usize);
 
-        if cubes[grid.get_vector_pos(pos)] != EMPTY_CUBE {
-            let index = grid.get_vector_pos(pos);
-            if index < 0 || index >= cubes.len() {
-                return (0, 0, 0);
-            }
-            cubes[grid.get_vector_pos(pos)] = 3;
-            println!("hovered cube {:?}", pos);
-            return (0, 0, 0);
+        let index = grid.get_vector_pos((x as usize + view_point.0, y as usize + view_point.1, pz as usize + view_point.2));
+        if index >= GRID_WIDTH * GRID_WIDTH * GRID_HEIGHT {
+            return None;
+        }
+        let cube = grid.get_cube((x as usize + view_point.0, y as usize + view_point.1, pz as usize + view_point.2));
+        if cube.cube_type != EMPTY_CUBE || cube.agent.is_some() {
+            return Some(pos);
         }
     }
-    (0, 0, 0)
+    None
 }
-*/
 
 
 struct Sprite {
