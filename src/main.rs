@@ -1,16 +1,26 @@
 mod render;
 mod agents;
 mod grid;
+mod animation;
+mod input;
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::ops::Deref;
 use std::path::Path;
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::{mpsc, Arc, LockResult, Mutex, RwLock};
+use std::sync::mpsc::Sender;
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 use image::{open, Frame};
 use minifb::{Key, MouseMode, Window, WindowOptions};
-use crate::agents::{find_path, Agent, AgentTask, Animation};
+use minifb::Key::K;
+use crate::agents::{find_path, Agent, AgentCoroutine, AgentEvent, AgentTask};
+use crate::agents::AgentEvent::AgentAddTask;
+use crate::animation::{Animation, AnimationPool};
 use crate::grid::{Cube, Grid};
+use crate::input::InputBuffer;
 use crate::render::{draw_left_face, draw_right_face, draw_sprite, draw_top_face};
 
 const SCREEN_WIDTH: usize = 2000;
@@ -36,23 +46,89 @@ const TOP_FACE_CUBE_MASK: u64 = CUBE_TYPE_MASK << 24;
 
 const EMPTY_CUBE: u8 = 255;
 
-enum Event {
-    Move{
-        from: (usize, usize, usize),
-        to: (usize, usize, usize),
-    },
 
-}
+fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
+    let mut completed = false;
+    if let Some(task_wrapper) = &mut agent.active_task {
+        match &mut task_wrapper.task {
+            AgentTask::Move { path, ..} => {
+                let next = path.pop().unwrap();
+                if path.is_empty() {
+                    completed = true;
+                }
+                {
+                    let grid_lock = grid.lock();
+                    println!("locked grid");
+                    match grid_lock {
+                        Ok(mut grid) => {
+                            println!("path len: {:?}", next);
+                            if !grid.is_occupied(next) {
+                                let x_dir = next.0 as i32 - agent.position.0 as i32;
+                                let y_dir = next.1 as i32 - agent.position.1 as i32;
+                                if x_dir < 0 {
+                                    agent.change_animation("running_nw");
+                                }
+                                else if x_dir > 0 {
+                                    agent.change_animation("running_se");
+                                }
+                                else if y_dir < 0 {
+                                    agent.change_animation("running_ne");
+                                }
+                                else {
+                                    agent.change_animation("running_sw");
+                                }
+                                println!("tryingf to move");
+                                grid.move_cube(agent.position, next);
+                                agent.position = next;
 
-enum AgentEvent {
-    AgentAddTask {
-        task: AgentTask,
-        agent: usize
+                            }
+                            else {
+                                println!("no path");
+                                //recalculate path
+                                //let path = find_path(agent.position, agent.destination.unwrap(), &grid);
+                                if let Some(destination) = agent.destination {
+                                    if let Some(path) = find_path(agent.position, destination, &*grid) {
+                                        agent.tasks.insert(0, AgentTask::Move {
+                                            path: path,
+                                            destination: destination,
+                                        });
+                                    }
+                                }
+
+                                completed = true;
+                            }
+
+                        }
+                        Err(_) => {}
+                    }
+                }
+            }
+            AgentTask::FindPath { destination } => {
+                let start = agent.destination.or(Some(agent.position)).unwrap();
+                {
+                    let grid_lock = grid.lock();
+                    if let Some(path) = find_path(start, *destination, grid_lock.unwrap().deref()) {
+                        agent.tasks.push(AgentTask::Move {
+                            path: path,
+                            destination: destination.clone(),
+                        });
+                    }
+
+                    completed = true;
+                }
+
+            }
+        }
+    }
+    if completed {
+        if let Some(task_wrapper) = &mut agent.active_task {
+            task_wrapper.completed = true;
+        }
     }
 }
 
-#[tokio::main(name = "my-runtime")]
-async fn main() {
+
+fn main() {
     let stone = Sprite::new("resources/24/stone.png");
     let mud = Sprite::new("resources/24/mud.png");
     let grass = Sprite::new("resources/24/grass.png");
@@ -103,7 +179,7 @@ async fn main() {
 
     let sprites = vec![stone, mud, grass, blank, floor, man];
 
-    let mut grid =prepare_grid();
+    let grid = Arc::new(Mutex::new(prepare_grid()));
 
     let plough_animation = Arc::new(Animation {
         frames: vec![man1, man2, man3, man4, man5, man6, man7, man8, man9],
@@ -128,87 +204,91 @@ async fn main() {
         name: "running_se".to_string(),
     });
 
-    let path = find_path((GRID_WIDTH-1,GRID_WIDTH-1,GRID_HEIGHT-1), (GRID_WIDTH-11,GRID_WIDTH-21,GRID_HEIGHT-1), &grid);
+    let worker_animations = Arc::new(AnimationPool {
+        animations: HashMap::from([
+            ("ploughing".to_string(), plough_animation),
+            ("running_ne".to_string(), run_animation_ne),
+            ("running_nw".to_string(), run_animation_nw),
+            ("running_se".to_string(), run_animation_se),
+            ("running_sw".to_string(), run_animation_sw),
+        ])
+    });
+
 
     let mut man = Agent {
-        animation: Arc::clone(&plough_animation),
-        position: (GRID_WIDTH-1,GRID_WIDTH-1,GRID_HEIGHT-4),
+        animation: worker_animations.animations["ploughing"].clone(),
+        position: (GRID_WIDTH-1, GRID_WIDTH-1, GRID_HEIGHT-4),
+        animation_pool: Arc::clone(&worker_animations),
         name: "man".to_string(),
         animation_state: 0,
-        task: Some(AgentTask::Move(path)),
+        destination: None,
+        tasks: vec![],
+        active_task: None,
+        id: 0
     };
 
-    let (tx, rx) = mpsc::channel();
+    grid.lock().unwrap().spawn_agent(&mut man);
+
+
     let (game_events, game_events_receiver) = mpsc::channel();
     let agents: Arc<Mutex<Vec<Agent>>> = Arc::new(Mutex::new(vec![man]));
     let agent_clone = Arc::clone(&agents);
+    let grid_clone = Arc::clone(&grid);
+
+    let mut gate_tick: u32 = 0;
     let agent_loop = thread::spawn(move || {
         loop {
 
             {
+                //println!("game tick: {}", gate_tick);
                 let mut mut_agents =  agent_clone.lock().unwrap();
                 match game_events_receiver.try_recv() {
                     Ok(ev) => {
                         match ev {
-                            AgentEvent::AgentAddTask { agent, task } => {
+                            AgentAddTask { agent, task } => {
                                 println!("got task");
-                                mut_agents[agent].task = Some(task);
+                                mut_agents[agent].tasks.push(task);
                             },
                             _ =>{}
                         }
 
                     },
-                    Err(_) => {
-                    },
+                    Err(_) => {},
                 }
                 for mut agent in mut_agents.iter_mut() {
-                    match &mut agent.task {
-                        Some(task) => {
-                            match task {
-                                AgentTask::Move(path) => {
-                                    if path.is_empty() {
-                                        agent.task = None;
-                                    }
-                                    else {
-                                        let next= path.pop().unwrap();
-                                        let x_dir = next.0 as i8 - agent.position.0 as i8;
-                                        let y_dir = next.1 as i8 - agent.position.1 as i8;
-                                        if x_dir < 0 {
-                                            agent.animation = Arc::clone(&run_animation_nw);
-                                        }
-                                        else if x_dir > 0 {
-                                            agent.animation = Arc::clone(&run_animation_se);
-                                        }
-                                        else if y_dir < 0 {
-                                            agent.animation = Arc::clone(&run_animation_ne);
-                                        }
-                                        else {
-                                            agent.animation = Arc::clone(&run_animation_sw);
-                                        }
-                                        tx.send(Event::Move {
-                                            from: agent.position,
-                                            to: next,
-                                        });
-                                        agent.position = next;
+                    agent.advance_animation_state();
+                    if let Some(active_task) = &agent.active_task {
+                        //println!("active task: {:?}", active_task.end_tick);
+                        if gate_tick < active_task.end_tick {
+                            continue;
+                        }
+                        //println!("gate tick: {}", gate_tick);
+                        advance_task(agent, Arc::clone(&grid_clone));
 
-                                    }
-                                }
+                        if let Some(task) = &agent.active_task {
+                            if !task.completed {
+                               continue;
                             }
-                        },
-                        None => {
-                            agent.animation = Arc::clone(&plough_animation);
+                            agent.active_task = None;
                         }
                     }
 
-                    if agent.animation_state == agent.animation.frames.len() - 1 {
-                        agent.animation_state = 0
+                    if agent.tasks.is_empty() {
+                        continue;
                     }
-                    else {
-                        agent.animation_state = agent.animation_state + 1
-                    }
+                    let mut next_task = agent.tasks.remove(0);
+                    let task = AgentCoroutine {
+                        task: next_task,
+                        end_tick: gate_tick + 5,
+                        completed: false,
+                    };
+                    println!("adding actibe task");
+                    agent.active_task = Some(task);
+
                 }
             }
             sleep(Duration::from_millis(300));
+            gate_tick += 1;
         }
     });
 
@@ -229,23 +309,20 @@ async fn main() {
     let mut view_z = GRID_HEIGHT - VIEW_HEIGHT;
     let mut selected_cube = (VIEW_WIDTH-1, VIEW_WIDTH-1, VIEW_HEIGHT-1);
     let mut highlight_coolur = 0;
+    let read_only_grid = Arc::clone(&grid);
+
+    let mut input_buffer = InputBuffer::new();
+    let mut selection_state = InputState {
+        selected_agent: None
+    };
+
+
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        match rx.try_recv() {
-            Ok(ev) => {
-                match ev {
-                    Event::Move{ from, to} => {
-                        grid.move_cube(from, to);
-                    }
-                }
-            },
-            Err(..) => {
-
-            }
-        }
-
         let scroll_input = window.get_scroll_wheel().map(|scroll| {
             scroll.1
         });
+
+        input_buffer.update_button_states(window.get_keys());
 
         if let Some(scroll_input) = scroll_input {
             if scroll_input > 0.0 && view_z < GRID_HEIGHT - VIEW_HEIGHT {
@@ -257,43 +334,38 @@ async fn main() {
         }
 
         let mut buffer = buffer.clone();
-        if window.get_keys().contains(&Key::D) && view_x < GRID_WIDTH - VIEW_WIDTH {
+        if input_buffer.button_pressed(Key::D) && view_x < GRID_WIDTH - VIEW_WIDTH {
             view_x += 1;
         }
-        if window.get_keys().contains(&Key::A) && view_x > 0 {
+        if  input_buffer.button_pressed(Key::A) && view_x > 0 {
             view_x -= 1;
         }
-        if window.get_keys().contains(&Key::S) && view_y > 0 {
+        if  input_buffer.button_pressed(Key::S) && view_y > 0 {
             view_y -= 1;
         }
-        if window.get_keys().contains(&Key::W) && view_y < GRID_WIDTH - VIEW_WIDTH {
+        if  input_buffer.button_pressed(Key::W) && view_y < GRID_WIDTH - VIEW_WIDTH {
             view_y += 1;
         }
 
-        if window.get_keys().contains(&Key::Right) && selected_cube.0 < VIEW_WIDTH {
+        if  input_buffer.button_pressed(Key::Right) && selected_cube.0 < VIEW_WIDTH {
             selected_cube = (selected_cube.0 + 1, selected_cube.1, selected_cube.2);
         }
-        if window.get_keys().contains(&Key::Left) && selected_cube.0 > 0 {
+        if  input_buffer.button_pressed(Key::Left) && selected_cube.0 > 0 {
             selected_cube = (selected_cube.0 - 1, selected_cube.1, selected_cube.2);
         }
-        if window.get_keys().contains(&Key::Down) && selected_cube.1 < VIEW_WIDTH {
+        if  input_buffer.button_pressed(Key::Down) && selected_cube.1 < VIEW_WIDTH {
             selected_cube = (selected_cube.0, selected_cube.1 + 1, selected_cube.2);
         }
-        if window.get_keys().contains(&Key::Up) && selected_cube.1 > 0 {
+        if  input_buffer.button_pressed(Key::Up) && selected_cube.1 > 0 {
             selected_cube = (selected_cube.0, selected_cube.1 - 1, selected_cube.2);
         }
 
-        if window.get_keys().contains(&Key::Space) {
+        if input_buffer.button_pressed(Key::Space) {
             {
-                let agents_clone = Arc::clone(&agents);
-                let agents_clone = agents_clone.lock().unwrap();
-                println!("moving");
-                game_events.send(AgentEvent::AgentAddTask {
-                    task: AgentTask::Move(find_path(agents_clone[0].position, (selected_cube.0 + view_x, selected_cube.1 + view_y, selected_cube.2 + view_z), &grid)),
-                    agent: 0
-                });
+                let grid_lock = read_only_grid.lock().unwrap();
+                let cube_data = grid_lock.get_cube((selected_cube.0 + view_x, selected_cube.1 + view_y, selected_cube.2 + view_z));
+                handle_selection(cube_data, &game_events, (selected_cube.0 + view_x, selected_cube.1 + view_y, selected_cube.2 + view_z), &mut selection_state);
             }
-
 
         }
 
@@ -313,8 +385,12 @@ async fn main() {
                         continue;
                     }
 
-                    let cube_data = grid[cube_index];
-                    if (cube_data.cube_type == EMPTY_CUBE && !cube_data.agent.is_some()) {
+                    let cube_data = {
+                        let grid = read_only_grid.lock().unwrap();
+                        grid[cube_index]
+                    };
+
+                    if cube_data.cube_type == EMPTY_CUBE && !cube_data.agent.is_some() {
                         continue;
                     }
 
@@ -325,39 +401,41 @@ async fn main() {
                         continue;
                     }
 
-                    if let Some(next_x) = grid.get_cube_next_x(cube_index) {
-                        if next_x.is_transparent() || x == VIEW_WIDTH - 1 {
+                    {
+                        let grid = read_only_grid.lock().unwrap();
+                        if let Some(next_x) = grid.get_cube_next_x(cube_index) {
+                            if next_x.is_transparent() || x == VIEW_WIDTH - 1 {
+                                let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
+                                draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
+                            }
+                        }
+                        else {
                             let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
                             draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
                         }
-                    }
-                    else {
-                        let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                        draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
-                    }
 
-                    if let Some(next_y) = grid.get_cube_next_y(cube_index) {
-                        if next_y.is_transparent() || y == VIEW_WIDTH - 1 {
+                        if let Some(next_y) = grid.get_cube_next_y(cube_index) {
+                            if next_y.is_transparent() || y == VIEW_WIDTH - 1 {
+                                let face = cube_data.cube_y_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
+                                draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
+                            }
+                        }
+                        else {
                             let face = cube_data.cube_y_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
                             draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
                         }
-                    }
-                    else {
-                        let face = cube_data.cube_y_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                        draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
-                    }
 
-                    if let Some(next_z) = grid.get_cube_above(cube_index) {
-                        if next_z.is_transparent() || z == VIEW_HEIGHT - 1 {
-                            let face = cube_data.cube_z_face.map_or(&sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
+                        if let Some(next_z) = grid.get_cube_above(cube_index) {
+                            if next_z.is_transparent() || z == VIEW_HEIGHT - 1 {
+                                let face = cube_data.cube_z_face.map_or(&sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
+                                draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
+                            }
+                        }
+                        else {
+                            let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
                             draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
                         }
                     }
-                    else {
-                        let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                        draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
-                    }
-
                 }
             }
         }
@@ -366,6 +444,31 @@ async fn main() {
             .update_with_buffer(&buffer, SCREEN_WIDTH, SCREEN_HEIGHT)
             .unwrap();
     }
+}
+
+
+struct InputState {
+    selected_agent: Option<u8>,
+}
+
+fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube: (usize, usize, usize), selection_state: &mut InputState) {
+    if let Some(agent) = cube.agent {
+        selection_state.selected_agent = Some(agent);
+        return;
+    }
+    match selection_state.selected_agent {
+        Some(agent) => {
+            game_events.send(AgentAddTask {
+                task: AgentTask::FindPath {
+                    destination: selected_cube,
+                },
+                agent: agent as usize,
+            });
+            selection_state.selected_agent = None;
+        },
+        None => {}
+    }
+
 }
 
 
@@ -400,33 +503,30 @@ enum Face {
 }
 
 fn prepare_grid() -> Grid {
-    let mut grid = Grid::new(GRID_WIDTH ,GRID_WIDTH,GRID_HEIGHT);
+    let mut grid = Grid::new(GRID_WIDTH, GRID_HEIGHT);
 
     for i in 0..GRID_WIDTH {
         for j in 0..GRID_WIDTH {
             let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 1));
-            grid[index] = Cube::new(EMPTY_CUBE);// + (4 << 24);
+            grid[index] = Cube::new(EMPTY_CUBE);
             let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 2));
-            grid[index] = Cube::new(EMPTY_CUBE);// + (4 << 24);
+            grid[index] = Cube::new(EMPTY_CUBE);
             let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 3));
-            grid[index] = Cube::new(EMPTY_CUBE);// + (4 << 24);
+            grid[index] = Cube::new(EMPTY_CUBE);
             let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 4));
-            grid[index] = Cube::new(EMPTY_CUBE);// + (4 << 24);
+            grid[index] = Cube::new(EMPTY_CUBE);
             let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 5));
-            grid[index] = Cube::new(2);// + (4 << 24);
+            grid[index] = Cube::new(2);
             let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 6));
-            grid[index] = Cube::new(2);// + (4 << 24);
+            grid[index] = Cube::new(2);
             let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 7));
-            grid[index] = Cube::new(1);// + (4 << 24);
+            grid[index] = Cube::new(1);
             let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 8));
-            grid[index] = Cube::new(1);// + (4 << 24);
+            grid[index] = Cube::new(1);
         }
     }
 
-    let agent_start_index = grid.get_vector_pos((GRID_WIDTH-1, GRID_WIDTH - 1,GRID_HEIGHT-4));
-    grid[agent_start_index] = Cube::with_agent(0);
-
-    let epicentre= (GRID_WIDTH / 2, GRID_WIDTH -1, GRID_HEIGHT / 2);
+    let epicentre= (GRID_WIDTH / 2, GRID_WIDTH / 2, GRID_HEIGHT -1);
 
     for i in 0..GRID_WIDTH {
         for j in 0..GRID_WIDTH {

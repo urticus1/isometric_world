@@ -1,11 +1,14 @@
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 use crate::{Sprite, CUBE_TYPE_MASK, EMPTY_CUBE, GRID_WIDTH};
+use crate::animation::{Animation, AnimationPool};
 use crate::grid::Grid;
 
-pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid: &Grid) -> Vec<(usize, usize, usize)> {
+pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid: &Grid) -> Option<Vec<(usize, usize, usize)>> {
     println!("{:?} -> {:?}", start, end);
     let mut closed: HashMap<(usize, usize, usize), Rc<Node>> = HashMap::new();
     let mut nodes: HashMap<(usize, usize, usize), Rc<Node>> = HashMap::new();
@@ -56,14 +59,14 @@ pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid:
                 }
             }
             if neighbour == end {
-                return reconstruct_path(Rc::clone(&nodes[&end]));
+                return Some(reconstruct_path(Rc::clone(&nodes[&end])));
             }
         }
         closed.insert(current.position, current);
 
     }
 
-    vec![]
+    None
 }
 
 fn reconstruct_path(end: Rc<Node>) -> Vec<(usize, usize, usize)> {
@@ -74,7 +77,8 @@ fn reconstruct_path(end: Rc<Node>) -> Vec<(usize, usize, usize)> {
         path.push(node.position);
         current = node.parent.clone();
     }
-
+    println!("path len: {}", path.len());
+    path.remove(path.len() - 1);
     path
 }
 
@@ -124,19 +128,56 @@ fn get_neighbours(position: (usize, usize, usize), grid: &Grid) -> Vec<(usize, u
     neighbours
 }
 
+pub enum AgentEvent {
+    AgentAddTask {
+        task: AgentTask,
+        agent: usize
+    }
+}
+
+
 pub struct Agent {
     pub name: String,
-    pub animation:  Arc<Animation>,
+    pub animation: Arc<Animation>,
     pub animation_state: usize,
+    pub animation_pool: Arc<AnimationPool>,
     pub position: (usize, usize, usize),
-    pub task: Option<AgentTask>
+    pub destination: Option<(usize, usize, usize)>,
+    pub tasks: Vec<AgentTask>,
+    pub active_task: Option<AgentCoroutine>,
+    pub id: usize,
+}
+
+impl Agent {
+    pub fn change_animation(&mut self, animation: &str) {
+        if self.animation.name == animation {
+            return;
+        }
+        self.animation_state = 0;
+        let animations = Arc::clone(&self.animation_pool);
+        self.animation = Arc::clone(animations.as_ref().animations.get(animation).expect(format!("Failed to get animation {}", animation).as_str()));
+    }
+
+    pub fn advance_animation_state(&mut self)  {
+        self.animation_state += 1;
+        if self.animation_state >= self.animation.frames.len() {
+            self.animation_state = 0;
+        }
+    }
+}
+
+pub struct AgentCoroutine {
+    pub end_tick: u32,
+    pub task: AgentTask,
+    pub completed: bool,
 }
 
 pub enum AgentTask {
-    Move(Vec<(usize, usize, usize)>),
-}
-
-pub struct Animation {
-    pub frames: Vec<Sprite>,
-    pub name: String
+    Move {
+        path: Vec<(usize, usize, usize)>,
+        destination: (usize, usize, usize),
+    },
+    FindPath {
+        destination: (usize, usize, usize),
+    }
 }

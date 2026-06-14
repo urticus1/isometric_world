@@ -1,63 +1,74 @@
 use std::ops::{Index, IndexMut};
-use crate::{Agent, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH, VIEW_WIDTH};
+use crate::{Agent, EMPTY_CUBE, VIEW_WIDTH};
 
 
 
 pub struct Grid {
     pub grid: Vec<Cube>,
+    width: usize,
+    height: usize
 }
 
 impl Grid {
 
-    pub fn new(x: usize, y: usize, height: usize) -> Grid {
+    pub fn new(width: usize, height: usize) -> Grid {
         Grid {
-            grid: vec![Cube::new(0); GRID_HEIGHT * GRID_WIDTH * GRID_WIDTH]
+            grid: vec![Cube::new(0); width * width * height],
+            width: width,
+            height: height
         }
     }
 
     pub fn get_cube_next_x(&self, i: usize) -> Option<Cube> {
-        if i % GRID_WIDTH == GRID_WIDTH -1 {
+        if i % self.width == self.width -1 {
             return None
         }
         Some(self.grid[i + 1])
     }
 
     pub fn get_cube_next_y(&self, i: usize) -> Option<Cube> {
-        if i % (GRID_WIDTH * GRID_WIDTH) + GRID_WIDTH >= GRID_WIDTH * GRID_WIDTH {
+        if i % (self.width * self.width) + self.width >= self.width * self.width {
             return None
         }
-        Some(self.grid[i + GRID_WIDTH])
+        Some(self.grid[i + self.width])
     }
 
     pub fn get_cube_above(&self, i: usize) -> Option<Cube> {
-        let val = i + GRID_WIDTH * GRID_WIDTH;
-        if val >= GRID_HEIGHT * GRID_WIDTH * GRID_WIDTH {
+        let val = i + self.width * self.width;
+        if val >= self.height * self.width * self.width {
             return None;
         }
-        Some(self.grid[i + GRID_WIDTH * GRID_WIDTH])
-    }
-
-    pub fn get_grid_pos(&self, n: usize) -> (usize, usize, usize) {
-        let x = n % VIEW_WIDTH;
-        let y = (n / (VIEW_WIDTH)) % VIEW_WIDTH;
-        let z = n / (VIEW_WIDTH * VIEW_WIDTH);
-
-        (x, y, z)
+        Some(self.grid[i + self.width * self.width])
     }
 
     pub fn get_vector_pos(&self, world_space: (usize, usize, usize)) -> usize {
-        world_space.0 + world_space.1 * GRID_WIDTH + world_space.2 * GRID_WIDTH * GRID_WIDTH
+        world_space.0 + world_space.1 * self.width + world_space.2 * self.width * self.width
     }
 
     pub fn move_cube(&mut self, from: (usize, usize, usize), to: (usize, usize, usize)) {
         if from == to {
             return;
         }
+        println!("move from {:?} to {:?}", from, to);
         let from_index = self.get_vector_pos(from);
         let to_index = self.get_vector_pos(to);
         let move_cube = self.grid[from_index].clone();
         self.grid[to_index] = move_cube;
         self.grid[from_index] = Cube::new(EMPTY_CUBE);
+    }
+
+    pub fn spawn_agent(&mut self, agent: &Agent) {
+        let index = self.get_vector_pos(agent.position);
+        self.grid[index] = Cube::with_agent(agent.id as u8);
+    }
+
+    pub fn get_cube(&self, pos: (usize, usize, usize)) -> &Cube {
+        &self.grid[self.get_vector_pos(pos)]
+    }
+
+    pub fn is_occupied(&self, position: (usize, usize, usize)) -> bool {
+        let index = self.get_vector_pos(position);
+        self.grid[index].agent.is_some() || self.grid[index].cube_type != EMPTY_CUBE
     }
 }
 
