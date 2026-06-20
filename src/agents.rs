@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use crate::{Sprite, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH};
 use crate::animation::{Animation, AnimationPool};
-use crate::grid::{Cube, Grid};
+use crate::grid::{find_horizontal_neighbours, Cube, Grid};
 
 pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid: &Grid) -> Option<Vec<(usize, usize, usize)>> {
     println!("{:?} -> {:?}", start, end);
@@ -77,7 +77,6 @@ fn reconstruct_path(end: Rc<Node>) -> Vec<(usize, usize, usize)> {
         path.push(node.position);
         current = node.parent.clone();
     }
-    println!("path len: {}", path.len());
     path.remove(path.len() - 1);
     path
 }
@@ -188,12 +187,31 @@ pub enum AgentTask {
     FindPath {
         destination: (usize, usize, usize),
     },
-    Plough,
+    Plough {
+        target: (usize, usize, usize)
+    },
     Dig {
         target: (usize, usize, usize),
     },
     Place {
         target: (usize, usize, usize),
         cube: Cube
+    }
+}
+
+
+impl AgentTask {
+
+    /**
+    * return the positions required by the agent in order to perform this task
+    */
+    pub fn get_required_position(&self) -> Option<Vec<(usize, usize, usize)>> {
+        match self {
+            AgentTask::Move { .. } => None,
+            AgentTask::FindPath { .. } => None,
+            AgentTask::Plough { target } => Some(vec![(target.0, target.1, target.2 + 1)]),
+            AgentTask::Dig { target } => Some(find_horizontal_neighbours((target.0, target.1, target.2 + 1))),
+            AgentTask::Place { target, .. } => Some(find_horizontal_neighbours((target.0, target.1, target.2 + 1)))
+        }
     }
 }

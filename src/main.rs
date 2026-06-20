@@ -52,7 +52,6 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
                     let grid_lock = grid.lock();
                     match grid_lock {
                         Ok(mut grid) => {
-                            println!("path len: {:?}", next);
                             if !grid.is_occupied(next) {
                                 let x_dir = next.0 as i32 - agent.position.0 as i32;
                                 let y_dir = next.1 as i32 - agent.position.1 as i32;
@@ -105,53 +104,23 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
                 }
 
             }
-            AgentTask::Plough => {
+            AgentTask::Plough { target } => {
                 if agent.position.2 > 0 {
-                    let below = (agent.position.0, agent.position.1, agent.position.2 - 1);
                     if let Ok(mut grid) = grid.lock() {
-                        let index = grid.get_vector_pos(below);
+                        let index = grid.get_vector_pos(*target);
                         grid[index].cube_type = 4;
                     }
                 }
                 completed = true;
             }
             AgentTask::Dig { target } => {
-                let above = (target.0, target.1, target.2 + 1);
-                if !is_horizontal_neighbour(agent.position, above) {
-                    for neighbour in find_horizontal_neighbours(above) {
-                        {
-                            let grid_lock = grid.lock();
-                            if let Some(path) = find_path(agent.position, neighbour, grid_lock.unwrap().deref()) {
-                                let clone = task_wrapper.task.clone();
-                                agent.tasks.insert(0, clone);
-                                agent.active_task = Some(
-                                    AgentCoroutine {
-                                        end_tick: 0,
-                                        task: AgentTask::Move {
-                                            destination: neighbour,
-                                            path: path,
-                                        },
-                                        completed: false,
-                                    }
-                                );
-
-                                return;
-                            }
-                        }
+                if agent.position.2 > 0 {
+                    if let Ok(mut grid) = grid.lock() {
+                        let index = grid.get_vector_pos(*target);
+                        grid[index].cube_type = EMPTY_CUBE;
                     }
-                    completed = true; //no path
                 }
-                else {
-                    if agent.position.2 > 0 {
-                        if let Ok(mut grid) = grid.lock() {
-                            let index = grid.get_vector_pos(*target);
-                            grid[index].cube_type = EMPTY_CUBE;
-                        }
-                    }
-                    completed = true;
-                }
-
-
+                completed = true;
             }
             AgentTask::Place { target, cube } => {
 
@@ -352,9 +321,29 @@ fn main() {
                         agent.change_animation("idle");
                         continue;
                     }
-                    let next_task = agent.tasks.remove(0);
+                    let mut next_task = agent.tasks.remove(0);
+
+                    if let Some(required_positions) = next_task.get_required_position() {
+                        if !required_positions.contains(&agent.position) {
+                            println!("not in required pos");
+                            for pos in required_positions {
+                                {
+                                    let grid_lock = grid_clone.lock();
+                                    if let Some(path) = find_path(agent.position, pos, grid_lock.unwrap().deref()) {
+                                        agent.tasks.insert(0, next_task.clone());
+                                        next_task = AgentTask::Move {
+                                            destination: pos,
+                                            path: path,
+                                        };
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     let end_tick = match &next_task {
-                        AgentTask::Plough => {
+                        AgentTask::Plough {..} => {
                             agent.change_animation("ploughing");
                             game_tick + 15
                         },
@@ -382,7 +371,7 @@ fn main() {
 
                 }
             }
-            sleep(Duration::from_millis(300));
+            sleep(Duration::from_millis(200));
             game_tick += 1;
         }
     });
@@ -465,18 +454,12 @@ fn main() {
             }
 
             if input_buffer.button_pressed(Key::P) {
+                let world_pos = (sel.0 + view_x, sel.1 + view_y, sel.2 + view_z);
                 if let Some(agent_id) = selection_state.selected_agent {
-                    let world_pos = (sel.0 + view_x, sel.1 + view_y, sel.2 + view_z);
-                    let above = (world_pos.0, world_pos.1, world_pos.2 + 1);
-                    let agent_pos = agents.lock().unwrap()[agent_id as usize].position;
-                    if agent_pos != above {
-                        let _ = game_events.send(AgentAddTask {
-                            task: AgentTask::FindPath { destination: above },
-                            agent: agent_id as usize,
-                        });
-                    }
                     let _ = game_events.send(AgentAddTask {
-                        task: AgentTask::Plough,
+                        task: AgentTask::Plough {
+                            target: world_pos,
+                        },
                         agent: agent_id as usize,
                     });
                 }

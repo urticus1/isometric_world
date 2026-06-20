@@ -49,7 +49,6 @@ impl Grid {
         if from == to {
             return;
         }
-        println!("move from {:?} to {:?}", from, to);
         let from_index = self.get_vector_pos(from);
         let to_index = self.get_vector_pos(to);
         let move_cube = self.grid[from_index].clone();
