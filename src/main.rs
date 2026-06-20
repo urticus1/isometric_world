@@ -138,9 +138,9 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
 
 
 fn main() {
-    let stone = Sprite::new("resources/24/stone.png");
+    let stone = Sprite::new("resources/24/stone_no_light.png");
     let mud = Sprite::new("resources/24/mud.png");
-    let grass = Sprite::new("resources/24/grass.png");
+    let grass = Sprite::new("resources/24/grass_no_light.png");
     let blank = Sprite::new("resources/24/blank.png");
     let floor = Sprite::new("resources/24/floor.png");
     let man = Sprite::new("resources/24/man/man_idle.png");
@@ -540,9 +540,12 @@ fn main() {
                         }
 
                         if let Some(next_z) = grid.get_cube_above(cube_index) {
-                            if next_z.is_transparent() || z == VIEW_HEIGHT - 1 {
+                            if next_z.is_transparent() {
                                 let face = cube_data.cube_z_face.map_or(&sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
                                 draw_face(Face::TOP,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
+                            }
+                            else if z == VIEW_HEIGHT - 1 {
+                                draw_face(Face::TOP,(cube_screen_x, cube_screen_y), &sprites[3], &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
                             }
                         }
                         else {
@@ -584,24 +587,34 @@ fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube
 fn prepare_grid() -> Grid {
     let mut grid = Grid::new(GRID_WIDTH, GRID_HEIGHT);
 
-    for i in 0..GRID_WIDTH {
-        for j in 0..GRID_WIDTH {
-            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 1));
-            grid[index] = Cube::new(EMPTY_CUBE);
-            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 2));
-            grid[index] = Cube::new(EMPTY_CUBE);
-            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 3));
-            grid[index] = Cube::new(EMPTY_CUBE);
-            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 4));
-            grid[index] = Cube::new(EMPTY_CUBE);
-            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 5));
-            grid[index] = Cube::new(2);
-            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 6));
-            grid[index] = Cube::new(2);
-            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 7));
-            grid[index] = Cube::new(1);
-            let index = grid.get_vector_pos((i,j,GRID_HEIGHT - 8));
-            grid[index] = Cube::new(1);
+
+    let ground_level = GRID_HEIGHT - 10;
+    let frequency_x: f32 = 0.2;
+    let variance_x = 5.0;
+    let frequency_y = 0.1;
+    let variance_y = 2.0;
+
+    for x in 0..GRID_WIDTH {
+        for y in 0..GRID_WIDTH {
+            for z in 0..GRID_HEIGHT {
+                let cut_off = ground_level as f32 + (x as f32 * frequency_x).sin() * variance_x + (y as f32 * frequency_y).sin() * variance_y;
+                let cut_off = cut_off as usize;
+                let coord = (x,y,z);
+                let index = grid.get_vector_pos(coord);
+                if z > cut_off {
+                    grid[index] = Cube::new(EMPTY_CUBE);
+                }
+                else if z == cut_off {
+                    grid[index] = Cube::new(2);
+                }
+                else if z < cut_off && z > cut_off - 5 {
+                    grid[index] = Cube::new(1);
+                }
+                else {
+                    grid[index] = Cube::new(0);
+                }
+            }
+
         }
     }
 
@@ -617,7 +630,7 @@ fn prepare_grid() -> Grid {
             }
         }
     }
-    light_flood_fill((GRID_WIDTH-1, GRID_WIDTH-1, GRID_HEIGHT - 4), &mut grid);
+    light_flood_fill((GRID_WIDTH-10, GRID_WIDTH-10, GRID_HEIGHT - 4), &mut grid);
     grid
 }
 

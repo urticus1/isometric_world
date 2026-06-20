@@ -154,7 +154,7 @@ impl Light {
 
     pub fn min_level() -> Light {
         Light {
-            level: 210
+            level: 255
         }
     }
 
