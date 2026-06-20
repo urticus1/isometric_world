@@ -37,6 +37,7 @@ const VIEW_HEIGHT: usize = 20;
 const VIEW_WIDTH: usize = 60;
 
 const EMPTY_CUBE: u8 = 255;
+const WATER_CUBE: u8 = 6;
 
 const SUN_LIGHT: (u8, u8, u8) = (205, 205, 205);
 
@@ -145,6 +146,7 @@ fn main() {
     let floor = Sprite::new("resources/24/floor.png");
     let man = Sprite::new("resources/24/man/man_idle.png");
     let select_cube = Sprite::new("resources/24/select_cube.png");
+    let water = Sprite::new("resources/24/water.png");
 
 
     let man1 = Sprite::new("resources/24/man/animations/ploughing/man_ploughing1.png");
@@ -199,7 +201,7 @@ fn main() {
 
     let man_idle = Sprite::new("resources/24/man/man_idle.png");
 
-    let sprites = vec![stone, mud, grass, blank, floor, man];
+    let sprites = vec![stone, mud, grass, blank, floor, man, water];
 
     let grid = Arc::new(Mutex::new(prepare_grid()));
 
@@ -248,9 +250,19 @@ fn main() {
     });
 
 
+    let man_x = GRID_WIDTH - 17;
+    let man_y = GRID_WIDTH - 30;
+    let man2_x = GRID_WIDTH - 17;
+    let man2_y = GRID_WIDTH - 31;
+
+    let (man_z, man2_z) = {
+        let grid_lock = grid.lock().unwrap();
+        (find_ground_spawn_z(&grid_lock, man_x, man_y), find_ground_spawn_z(&grid_lock, man2_x, man2_y))
+    };
+
     let mut man = Agent {
         animation: worker_animations.animations["idle"].clone(),
-        position: (GRID_WIDTH-1, GRID_WIDTH-1, GRID_HEIGHT-4),
+        position: (man_x, man_y, man_z),
         animation_pool: Arc::clone(&worker_animations),
         name: "man".to_string(),
         animation_state: 0,
@@ -262,7 +274,7 @@ fn main() {
 
     let mut man2 = Agent {
         animation: worker_animations.animations["idle"].clone(),
-        position: (GRID_WIDTH-5, GRID_WIDTH-5, GRID_HEIGHT-4),
+        position: (man2_x, man2_y, man2_z),
         animation_pool: Arc::clone(&worker_animations),
         name: "man2".to_string(),
         animation_state: 0,
@@ -592,7 +604,8 @@ fn prepare_grid() -> Grid {
     let frequency_x: f32 = 0.2;
     let variance_x = 5.0;
     let frequency_y = 0.1;
-    let variance_y = 2.0;
+    let variance_y = 6.0;
+    let sea_level = GRID_WIDTH - 17;
 
     for x in 0..GRID_WIDTH {
         for y in 0..GRID_WIDTH {
@@ -602,7 +615,12 @@ fn prepare_grid() -> Grid {
                 let coord = (x,y,z);
                 let index = grid.get_vector_pos(coord);
                 if z > cut_off {
-                    grid[index] = Cube::new(EMPTY_CUBE);
+                    if z > sea_level {
+                        grid[index] = Cube::new(EMPTY_CUBE);
+                    }
+                    else {
+                        grid[index] = Cube::new(6);
+                    }
                 }
                 else if z == cut_off {
                     grid[index] = Cube::new(2);
@@ -632,6 +650,15 @@ fn prepare_grid() -> Grid {
     }
     light_flood_fill((GRID_WIDTH-10, GRID_WIDTH-10, GRID_HEIGHT - 4), &mut grid);
     grid
+}
+
+fn find_ground_spawn_z(grid: &Grid, x: usize, y: usize) -> usize {
+    for z in (0..GRID_HEIGHT).rev() {
+        if grid.get_cube((x, y, z)).cube_type != EMPTY_CUBE {
+            return (z + 1).min(GRID_HEIGHT - 1);
+        }
+    }
+    0
 }
 
 fn get_screen_coord(world_space: (usize, usize, usize)) -> (usize, usize) {

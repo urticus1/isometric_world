@@ -1,5 +1,5 @@
 use std::ops::{Index, IndexMut};
-use crate::{Agent, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH, VIEW_WIDTH};
+use crate::{Agent, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH, VIEW_WIDTH, WATER_CUBE};
 
 
 
@@ -191,11 +191,11 @@ impl Cube {
     }
 
     pub fn is_walkable(&self) -> bool {
-        self.cube_type == EMPTY_CUBE
+        self.cube_type != WATER_CUBE
     }
 
     pub fn is_transparent(&self) -> bool {
-        self.cube_type == EMPTY_CUBE || self.agent.is_some()
+        self.cube_type == EMPTY_CUBE || self.agent.is_some() || self.cube_type == WATER_CUBE
     }
 
     pub fn with_agent(agent: u8) -> Cube {
