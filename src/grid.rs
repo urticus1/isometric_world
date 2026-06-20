@@ -157,6 +157,25 @@ impl Light {
             level: 210
         }
     }
+
+    pub fn from_level(level: u8) -> Light {
+        match level {
+            0 => Light::min_level(),
+            1 => Light::new(215),
+            2 => Light::new(220),
+            3 => Light::new(225),
+            4 => Light::new(230),
+            5 => Light::new(235),
+            6 => Light::new(240),
+            7 => Light::new(245),
+            8 => Light::new(250),
+            9 => Light::max_level(),
+            10 => Light::max_level(),
+            _ => {
+                panic!("Invalid level value: {}", level);
+            }
+        }
+    }
 }
 
 impl Cube {
