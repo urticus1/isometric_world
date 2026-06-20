@@ -1,5 +1,5 @@
 use std::ops::{Index, IndexMut};
-use crate::{Agent, EMPTY_CUBE, GRID_WIDTH, VIEW_WIDTH};
+use crate::{Agent, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH, VIEW_WIDTH};
 
 
 
@@ -65,6 +65,11 @@ impl Grid {
         &self.grid[self.get_vector_pos(pos)]
     }
 
+    pub fn get_cube_mut(&mut self, pos: (usize, usize, usize)) -> &mut Cube {
+        let index = self.get_vector_pos(pos);
+        &mut self.grid[index]
+    }
+
     pub fn is_occupied(&self, position: (usize, usize, usize)) -> bool {
         let index = self.get_vector_pos(position);
         self.grid[index].agent.is_some() || self.grid[index].cube_type != EMPTY_CUBE
@@ -75,7 +80,20 @@ pub fn find_horizontal_neighbours(start: (usize, usize, usize)) -> Vec<(usize, u
     let mut result = Vec::new();
     for dir in [(-1 as isize, 0 as isize), (1, 0), (0, -1), (0, 1)].iter() {
         let neighbour = (start.0 as isize + dir.0, start.1 as isize + dir.1, start.2);
-        if start.0 < 0 || start.0 > GRID_WIDTH - 1 || start.1 < 0 || start.1 > GRID_WIDTH - 1 {
+        if neighbour.0 < 0 || neighbour.0 > (GRID_WIDTH - 1) as isize || neighbour.1 < 0 || neighbour.1 > (GRID_WIDTH - 1) as isize {
+            continue;
+        }
+        let neighbour = (neighbour.0 as usize, neighbour.1 as usize, neighbour.2 as usize);
+        result.push(neighbour);
+    }
+    result
+}
+
+pub fn find_face_neighbours(start: (usize, usize, usize)) -> Vec<(usize, usize, usize)> {
+    let mut result = Vec::new();
+    for dir in [(-1 as isize, 0 as isize, 0 as isize), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0,0,1)].iter() {
+        let neighbour = (start.0 as isize + dir.0, start.1 as isize + dir.1, start.2 as isize + dir.2);
+        if neighbour.0 < 0 || neighbour.0 > (GRID_WIDTH - 1) as isize || neighbour.1 < 0 || neighbour.1 > (GRID_WIDTH - 1) as isize || neighbour.2 < 0 || neighbour.2 > (GRID_HEIGHT - 1) as isize {
             continue;
         }
         let neighbour = (neighbour.0 as usize, neighbour.1 as usize, neighbour.2 as usize);
@@ -113,8 +131,33 @@ pub struct Cube {
     pub cube_y_face: Option<u8>,
     pub cube_z_face: Option<u8>,
     pub agent: Option<u8>,
+    pub light_level: Light,
 }
 
+#[derive(Copy, Clone)]
+pub struct Light {
+    pub level: u8
+}
+
+impl Light {
+    pub fn new(level: u8) -> Self {
+        Light {
+            level
+        }
+    }
+
+    pub fn max_level() -> Light {
+        Light {
+            level: 255
+        }
+    }
+
+    pub fn min_level() -> Light {
+        Light {
+            level: 210
+        }
+    }
+}
 
 impl Cube {
     pub fn new(cube_type: u8) -> Self {
@@ -124,6 +167,7 @@ impl Cube {
             cube_x_face: None,
             cube_z_face: None,
             agent: None,
+            light_level: Light::min_level()
         }
     }
 
@@ -142,6 +186,7 @@ impl Cube {
             cube_x_face: None,
             cube_z_face: None,
             agent: Some(agent),
+            light_level: Light::min_level()
         }
     }
 }

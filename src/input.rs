@@ -86,6 +86,14 @@ impl InputBuffer {
         }
     }
 
+    pub fn button_pressed_or_held(&self, key: Key) -> bool {
+        match self.button_states.get(&key) {
+            Some(ButtonState::Pressed) => true,
+            Some(ButtonState::Held) => true,
+            _ => false
+        }
+    }
+
     pub fn button_released(&self, key: Key) -> bool {
         match self.button_states.get(&key) {
             Some(ButtonState::Released) => true,

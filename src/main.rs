@@ -21,7 +21,7 @@ use crate::agents::AgentEvent::AgentAddTask;
 use crate::animation::{Animation, AnimationPool};
 use crate::grid::{find_horizontal_neighbours, get_manhattan_distance, is_horizontal_neighbour, Cube, Grid};
 use crate::input::{InputBuffer, InputState};
-use crate::render::{draw_left_face, draw_right_face, draw_sprite, draw_top_face, Sprite};
+use crate::render::{draw_face, draw_sprite, light_flood_fill, Face, Sprite};
 
 const SCREEN_WIDTH: usize = 2000;
 const SCREEN_HEIGHT: usize = 1200;
@@ -37,6 +37,8 @@ const VIEW_HEIGHT: usize = 20;
 const VIEW_WIDTH: usize = 60;
 
 const EMPTY_CUBE: u8 = 255;
+
+const SUN_LIGHT: (u8, u8, u8) = (205, 205, 205);
 
 
 fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
@@ -418,16 +420,16 @@ fn main() {
         }
 
         let mut buffer = buffer.clone();
-        if input_buffer.button_pressed(Key::D) && view_x < GRID_WIDTH - VIEW_WIDTH {
+        if input_buffer.button_pressed_or_held(Key::D) && view_x < GRID_WIDTH - VIEW_WIDTH {
             view_x += 1;
         }
-        if  input_buffer.button_pressed(Key::A) && view_x > 0 {
+        if  input_buffer.button_pressed_or_held(Key::A) && view_x > 0 {
             view_x -= 1;
         }
-        if  input_buffer.button_pressed(Key::S) && view_y > 0 {
+        if  input_buffer.button_pressed_or_held(Key::S) && view_y > 0 {
             view_y -= 1;
         }
-        if  input_buffer.button_pressed(Key::W) && view_y < GRID_WIDTH - VIEW_WIDTH {
+        if  input_buffer.button_pressed_or_held(Key::W) && view_y < GRID_WIDTH - VIEW_WIDTH {
             view_y += 1;
         }
 
@@ -518,34 +520,34 @@ fn main() {
                         if let Some(next_x) = grid.get_cube_next_x(cube_index) {
                             if next_x.is_transparent() || x == VIEW_WIDTH - 1 {
                                 let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                                draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
+                                draw_face(Face::RIGHT,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
                             }
                         }
                         else {
                             let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                            draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
+                            draw_face(Face::RIGHT,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
                         }
 
                         if let Some(next_y) = grid.get_cube_next_y(cube_index) {
                             if next_y.is_transparent() || y == VIEW_WIDTH - 1 {
                                 let face = cube_data.cube_y_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                                draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
+                                draw_face(Face::LEFT, (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
                             }
                         }
                         else {
                             let face = cube_data.cube_y_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                            draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
+                            draw_face(Face::LEFT,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
                         }
 
                         if let Some(next_z) = grid.get_cube_above(cube_index) {
                             if next_z.is_transparent() || z == VIEW_HEIGHT - 1 {
                                 let face = cube_data.cube_z_face.map_or(&sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                                draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
+                                draw_face(Face::TOP,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
                             }
                         }
                         else {
                             let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                            draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, highlight_coolur)
+                            draw_face(Face::TOP,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
                         }
                     }
                 }
@@ -577,12 +579,6 @@ fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube
         None => {}
     }
 
-}
-
-enum Face {
-    X,
-    Y,
-    Z
 }
 
 fn prepare_grid() -> Grid {
@@ -621,6 +617,7 @@ fn prepare_grid() -> Grid {
             }
         }
     }
+    light_flood_fill((GRID_WIDTH-1, GRID_WIDTH-1, GRID_HEIGHT - 4), &mut grid);
     grid
 }
 
