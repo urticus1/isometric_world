@@ -136,45 +136,51 @@ pub struct Cube {
 
 #[derive(Copy, Clone)]
 pub struct Light {
-    pub level: u8
+    pub x_level: u8,
+    pub y_level: u8,
+    pub z_level: u8,
 }
 
 impl Light {
-    pub fn new(level: u8) -> Self {
+    pub fn new(x_level: u8, y_level: u8, z_level: u8) -> Self {
         Light {
-            level
+            x_level,
+            y_level,
+            z_level,
         }
     }
 
     pub fn max_level() -> Light {
         Light {
-            level: 255
+            x_level: 235,
+            y_level: 245,
+            z_level: 255,
         }
     }
 
     pub fn min_level() -> Light {
         Light {
-            level: 255
+            x_level: 100,
+            y_level: 100,
+            z_level: 100,
         }
     }
 
     pub fn from_level(level: u8) -> Light {
-        match level {
-            0 => Light::min_level(),
-            1 => Light::new(215),
-            2 => Light::new(220),
-            3 => Light::new(225),
-            4 => Light::new(230),
-            5 => Light::new(235),
-            6 => Light::new(240),
-            7 => Light::new(245),
-            8 => Light::new(250),
-            9 => Light::max_level(),
-            10 => Light::max_level(),
-            _ => {
-                panic!("Invalid level value: {}", level);
-            }
-        }
+        const MAX_LEVEL: u8 = 10;
+        let level = level.min(MAX_LEVEL);
+        let min = Light::min_level();
+        let max = Light::max_level();
+
+        let interpolate = |min_v: u8, max_v: u8| -> u8 {
+            min_v + ((max_v - min_v) as u32 * level as u32 / MAX_LEVEL as u32) as u8
+        };
+
+        Light::new(
+            interpolate(min.x_level, max.x_level),
+            interpolate(min.y_level, max.y_level),
+            interpolate(min.z_level, max.z_level),
+        )
     }
 }
 

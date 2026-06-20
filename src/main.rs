@@ -140,7 +140,7 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
 
 fn main() {
     let stone = Sprite::new("resources/24/stone_no_light.png");
-    let mud = Sprite::new("resources/24/mud.png");
+    let mud = Sprite::new("resources/24/mud_no_light.png");
     let grass = Sprite::new("resources/24/grass_no_light.png");
     let blank = Sprite::new("resources/24/blank.png");
     let floor = Sprite::new("resources/24/floor.png");
@@ -406,7 +406,6 @@ fn main() {
     let mut view_y = GRID_WIDTH - VIEW_WIDTH;
     let mut view_z = GRID_HEIGHT - VIEW_HEIGHT;
     let mut selected_cube: Option<(usize, usize, usize)> = None;
-    let mut highlight_coolur = 0;
     let read_only_grid = Arc::clone(&grid);
 
     let mut input_buffer = InputBuffer::new();
@@ -532,37 +531,37 @@ fn main() {
                         if let Some(next_x) = grid.get_cube_next_x(cube_index) {
                             if next_x.is_transparent() || x == VIEW_WIDTH - 1 {
                                 let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                                draw_face(Face::RIGHT,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
+                                draw_face(Face::RIGHT,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.x_level, cube_data.light_level.x_level, cube_data.light_level.x_level))
                             }
                         }
                         else {
                             let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                            draw_face(Face::RIGHT,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
+                            draw_face(Face::RIGHT,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.x_level, cube_data.light_level.x_level, cube_data.light_level.x_level))
                         }
 
                         if let Some(next_y) = grid.get_cube_next_y(cube_index) {
                             if next_y.is_transparent() || y == VIEW_WIDTH - 1 {
                                 let face = cube_data.cube_y_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                                draw_face(Face::LEFT, (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
+                                draw_face(Face::LEFT, (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.y_level, cube_data.light_level.y_level, cube_data.light_level.y_level))
                             }
                         }
                         else {
                             let face = cube_data.cube_y_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                            draw_face(Face::LEFT,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
+                            draw_face(Face::LEFT,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.y_level, cube_data.light_level.y_level, cube_data.light_level.y_level))
                         }
 
                         if let Some(next_z) = grid.get_cube_above(cube_index) {
                             if next_z.is_transparent() {
                                 let face = cube_data.cube_z_face.map_or(&sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                                draw_face(Face::TOP,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
+                                draw_face(Face::TOP,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.z_level, cube_data.light_level.z_level, cube_data.light_level.z_level))
                             }
                             else if z == VIEW_HEIGHT - 1 {
-                                draw_face(Face::TOP,(cube_screen_x, cube_screen_y), &sprites[3], &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
+                                draw_face(Face::TOP,(cube_screen_x, cube_screen_y), &sprites[3], &mut buffer, (cube_data.light_level.z_level, cube_data.light_level.z_level, cube_data.light_level.z_level))
                             }
                         }
                         else {
                             let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
-                            draw_face(Face::TOP,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.level, cube_data.light_level.level, cube_data.light_level.level))
+                            draw_face(Face::TOP,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_data.light_level.z_level, cube_data.light_level.z_level, cube_data.light_level.z_level))
                         }
                     }
                 }
@@ -648,7 +647,7 @@ fn prepare_grid() -> Grid {
             }
         }
     }
-    light_flood_fill((GRID_WIDTH-10, GRID_WIDTH-10, GRID_HEIGHT - 4), &mut grid);
+    light_flood_fill((84, 78, 112), &mut grid);
     grid
 }
 
