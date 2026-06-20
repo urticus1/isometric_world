@@ -16,6 +16,9 @@ pub enum ButtonState {
     Held,
 }
 
+pub struct InputState {
+    pub selected_agent: Option<u8>,
+}
 
 impl InputBuffer {
     pub fn new() -> InputBuffer {

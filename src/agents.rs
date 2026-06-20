@@ -4,9 +4,9 @@ use std::collections::{BinaryHeap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
-use crate::{Sprite, CUBE_TYPE_MASK, EMPTY_CUBE, GRID_WIDTH};
+use crate::{Sprite, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH};
 use crate::animation::{Animation, AnimationPool};
-use crate::grid::Grid;
+use crate::grid::{Cube, Grid};
 
 pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid: &Grid) -> Option<Vec<(usize, usize, usize)>> {
     println!("{:?} -> {:?}", start, end);
@@ -113,17 +113,24 @@ impl PartialOrd for Node {
 
 fn get_neighbours(position: (usize, usize, usize), grid: &Grid) -> Vec<(usize, usize, usize)> {
     let mut neighbours: Vec<(usize, usize, usize)> = Vec::new();
-    if position.0 > 0 && grid[grid.get_vector_pos((position.0 - 1, position.1, position.2))].is_walkable() {
-        neighbours.push((position.0 - 1, position.1, position.2));
-    }
-    if position.0 < GRID_WIDTH - 1 && grid[grid.get_vector_pos((position.0 + 1, position.1, position.2))].is_walkable() {
-        neighbours.push((position.0 + 1, position.1, position.2));
-    }
-    if position.1 > 0 && grid[grid.get_vector_pos((position.0, position.1 - 1, position.2))].is_walkable() {
-        neighbours.push((position.0, position.1 - 1, position.2));
-    }
-    if position.1 < GRID_WIDTH - 1 && grid[grid.get_vector_pos((position.0 , position.1 + 1 , position.2))].is_walkable() {
-        neighbours.push((position.0, position.1 + 1, position.2));
+
+    for dir in [(-1 as i32, 0 as i32), (1, 0), (0, -1), (0, 1)].iter() {
+        let next = (position.0 as i32 + dir.0, position.1 as i32 + dir.1, position.2);
+        if next.0 < 0 || next.0 > GRID_WIDTH as i32 - 1 || next.1 < 0 || next.1 > GRID_WIDTH as i32 - 1 {
+            continue;
+        }
+        let next = (next.0 as usize, next.1 as usize, next.2 as usize);
+        if grid[grid.get_vector_pos(next)].cube_type == EMPTY_CUBE {
+            if position.2 == 0 || grid[grid.get_vector_pos((next.0, next.1, next.2 - 1))].cube_type != EMPTY_CUBE {
+                neighbours.push(next);
+            }
+            else if position.2 >= 2 && grid[grid.get_vector_pos((next.0, next.1, next.2 - 2))].cube_type != EMPTY_CUBE {
+                neighbours.push((next.0, next.1, next.2 - 1));
+            }
+        }
+        else if position.2 < GRID_HEIGHT - 1 && grid[grid.get_vector_pos((next.0, next.1, next.2 + 1))].cube_type == EMPTY_CUBE {
+            neighbours.push((next.0, next.1, next.2 + 1));
+        }
     }
     neighbours
 }
@@ -172,6 +179,7 @@ pub struct AgentCoroutine {
     pub completed: bool,
 }
 
+#[derive(Clone)]
 pub enum AgentTask {
     Move {
         path: Vec<(usize, usize, usize)>,
@@ -180,5 +188,12 @@ pub enum AgentTask {
     FindPath {
         destination: (usize, usize, usize),
     },
-    Plough
+    Plough,
+    Dig {
+        target: (usize, usize, usize),
+    },
+    Place {
+        target: (usize, usize, usize),
+        cube: Cube
+    }
 }

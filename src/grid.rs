@@ -1,5 +1,5 @@
 use std::ops::{Index, IndexMut};
-use crate::{Agent, EMPTY_CUBE, VIEW_WIDTH};
+use crate::{Agent, EMPTY_CUBE, GRID_WIDTH, VIEW_WIDTH};
 
 
 
@@ -70,6 +70,27 @@ impl Grid {
         let index = self.get_vector_pos(position);
         self.grid[index].agent.is_some() || self.grid[index].cube_type != EMPTY_CUBE
     }
+}
+
+pub fn find_horizontal_neighbours(start: (usize, usize, usize)) -> Vec<(usize, usize, usize)> {
+    let mut result = Vec::new();
+    for dir in [(-1 as isize, 0 as isize), (1, 0), (0, -1), (0, 1)].iter() {
+        let neighbour = (start.0 as isize + dir.0, start.1 as isize + dir.1, start.2);
+        if start.0 < 0 || start.0 > GRID_WIDTH - 1 || start.1 < 0 || start.1 > GRID_WIDTH - 1 {
+            continue;
+        }
+        let neighbour = (neighbour.0 as usize, neighbour.1 as usize, neighbour.2 as usize);
+        result.push(neighbour);
+    }
+    result
+}
+
+pub fn get_manhattan_distance(start: (usize, usize, usize), end: (usize, usize, usize)) -> usize {
+    (end.0 - start.0) + (end.1 - start.1) + (end.2 - start.2)
+}
+
+pub fn is_horizontal_neighbour(start: (usize, usize, usize), end: (usize, usize, usize)) -> bool {
+    start.2 == end.2 && (end.0 as isize - start.0 as isize).abs() <= 1 && (end.1 as isize - start.1 as isize).abs() <= 1
 }
 
 impl Index<usize> for Grid {
