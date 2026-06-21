@@ -38,6 +38,7 @@ const VIEW_WIDTH: usize = 60;
 
 const EMPTY_CUBE: u8 = 255;
 const WATER_CUBE: u8 = 6;
+const LANTERN_CUBE: u8 = 7;
 
 const SUN_LIGHT: (u8, u8, u8) = (205, 205, 205);
 
@@ -128,7 +129,10 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
                 completed = true;
             }
             AgentTask::Place { target, cube } => {
-
+                if let Ok(mut grid) = grid.lock() {
+                    grid.place_cube(*target, *cube);
+                }
+                completed = true;
             }
         }
     }
@@ -149,6 +153,7 @@ fn main() {
     let man = Sprite::new("resources/24/man/man_idle.png");
     let select_cube = Sprite::new("resources/24/select_cube.png");
     let water = Sprite::new("resources/24/water.png");
+    let lantern = Sprite::new("resources/24/lantern.png");
 
 
     let man1 = Sprite::new("resources/24/man/animations/ploughing/man_ploughing1.png");
@@ -203,7 +208,7 @@ fn main() {
 
     let man_idle = Sprite::new("resources/24/man/man_idle.png");
 
-    let sprites = vec![stone, mud, grass, blank, floor, man, water];
+    let sprites = vec![stone, mud, grass, blank, floor, man, water, lantern];
 
     let grid = Arc::new(Mutex::new(prepare_grid()));
 
@@ -374,7 +379,7 @@ fn main() {
                         }
                         AgentTask::Dig { .. } => {
                             agent.change_animation("mining");
-                            game_tick + 2
+                            game_tick + 20
                         }
                         AgentTask::Place { .. } => {
                             game_tick + 9
@@ -492,12 +497,31 @@ fn main() {
                     });
                 }
             }
-            if input_buffer.button_pressed(Key::L) {
+            if input_buffer.button_pressed(Key::K) {
                 let world_pos = (sel.0 + view_x, sel.1 + view_y, sel.2 + view_z);
                 if let Some(agent_id) = selection_state.selected_agent {
                     let _ = game_events.send(AgentAddTask {
                         task: AgentTask::Dig {
                             target: world_pos,
+                        },
+                        agent: agent_id as usize,
+                    });
+                }
+            }
+            if input_buffer.button_pressed(Key::L) {
+                let world_pos = (sel.0 + view_x, sel.1 + view_y, sel.2 + 1 + view_z);
+                if let Some(agent_id) = selection_state.selected_agent {
+                    let _ = game_events.send(AgentAddTask {
+                        task: AgentTask::Place {
+                            target: world_pos,
+                            cube: Cube {
+                                cube_type: LANTERN_CUBE,
+                                cube_x_face: None,
+                                cube_y_face: None,
+                                cube_z_face: None,
+                                agent: None,
+                                light_level: Light::min_level(),
+                            }
                         },
                         agent: agent_id as usize,
                     });

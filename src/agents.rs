@@ -214,7 +214,7 @@ impl AgentTask {
             AgentTask::FindPath { .. } => None,
             AgentTask::Plough { target } => Some(vec![(target.0, target.1, target.2 + 1)]),
             AgentTask::Dig { target } => Some(find_horizontal_neighbours((target.0, target.1, target.2 + 1))),
-            AgentTask::Place { target, .. } => Some(find_horizontal_neighbours((target.0, target.1, target.2 + 1)))
+            AgentTask::Place { target, .. } => Some(find_horizontal_neighbours((target.0, target.1, target.2)))
         }
     }
 }

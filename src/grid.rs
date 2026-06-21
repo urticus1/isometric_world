@@ -1,9 +1,8 @@
 use std::cmp::max;
 use std::ops;
 use std::ops::{Index, IndexMut};
-use crate::{Agent, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH, VIEW_WIDTH, WATER_CUBE};
-
-
+use crate::{Agent, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH, LANTERN_CUBE, VIEW_WIDTH, WATER_CUBE};
+use crate::render::light_flood_fill;
 
 pub struct Grid {
     pub grid: Vec<Cube>,
@@ -65,6 +64,14 @@ impl Grid {
     pub fn delete_cube(&mut self, pos: (usize, usize, usize)) {
         let index = self.get_vector_pos(pos).unwrap();
         self.grid[index] = Cube::new(EMPTY_CUBE);
+    }
+
+    pub fn place_cube(&mut self, pos: (usize, usize, usize), cube: Cube) {
+        let index = self.get_vector_pos(pos).unwrap();
+        self.grid[index] = cube;
+        if cube.cube_type == LANTERN_CUBE {
+            light_flood_fill(pos, self);
+        }
     }
 
     pub fn spawn_agent(&mut self, agent: &Agent) {
@@ -163,7 +170,7 @@ impl Light {
 
     pub fn max_level() -> Light {
         Light {
-            x_level: 235,
+            x_level: 220,
             y_level: 245,
             z_level: 255,
         }
@@ -224,7 +231,7 @@ impl Cube {
     }
 
     pub fn is_transparent(&self) -> bool {
-        self.cube_type == EMPTY_CUBE || self.agent.is_some() || self.cube_type == WATER_CUBE
+        self.cube_type == EMPTY_CUBE || self.agent.is_some() || self.cube_type == WATER_CUBE ||self.cube_type == LANTERN_CUBE
     }
 
     pub fn with_agent(agent: u8) -> Cube {
