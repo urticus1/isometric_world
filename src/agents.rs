@@ -66,6 +66,7 @@ pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid:
 
     }
 
+    println!("no path found");
     None
 }
 
@@ -74,6 +75,7 @@ fn reconstruct_path(end: Rc<Node>) -> Vec<(usize, usize, usize)> {
     let mut current = Some(end);
 
     while let Some(node) = current {
+        println!("next {:?}", node.position);
         path.push(node.position);
         current = node.parent.clone();
     }
@@ -119,18 +121,23 @@ fn get_neighbours(position: (usize, usize, usize), grid: &Grid) -> Vec<(usize, u
             continue;
         }
         let next = (next.0 as usize, next.1 as usize, next.2 as usize);
-        if grid[grid.get_vector_pos(next).unwrap()].cube_type == EMPTY_CUBE {
+        let next_cube = grid[grid.get_vector_pos(next).unwrap()];
+        if next_cube.cube_type == EMPTY_CUBE && next_cube.agent.is_none() {
             if grid[grid.get_vector_pos((next.0, next.1, next.2 - 1)).unwrap()].is_walkable() {
                 neighbours.push(next);
             }
             else if
                 position.2 >= 2
                 && grid[grid.get_vector_pos((next.0, next.1, next.2 - 1)).unwrap()].cube_type == EMPTY_CUBE
+                && grid[grid.get_vector_pos((next.0, next.1, next.2 - 1)).unwrap()].agent.is_none()
                 && grid[grid.get_vector_pos((next.0, next.1, next.2 - 2)).unwrap()].is_walkable() {
                     neighbours.push((next.0, next.1, next.2 - 1));
             }
         }
-        else if position.2 < GRID_HEIGHT - 1 && grid[grid.get_vector_pos((next.0, next.1, next.2 + 1)).unwrap()].cube_type == EMPTY_CUBE && grid[grid.get_vector_pos(next).unwrap()].is_walkable(){
+        else if position.2 < GRID_HEIGHT - 1
+            && grid[grid.get_vector_pos((next.0, next.1, next.2 + 1)).unwrap()].cube_type == EMPTY_CUBE
+            && grid[grid.get_vector_pos((next.0, next.1, next.2 + 1)).unwrap()].agent.is_none()
+            && next_cube.is_walkable(){
             neighbours.push((next.0, next.1, next.2 + 1));
         }
     }

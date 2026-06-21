@@ -640,17 +640,19 @@ fn prepare_grid() -> Grid {
     let mut grid = Grid::new(GRID_WIDTH, GRID_HEIGHT);
 
 
-    let ground_level = GRID_HEIGHT - 10;
+    let ground_level = GRID_HEIGHT - 20;
     let frequency_x: f32 = 0.2;
     let variance_x = 5.0;
     let frequency_y = 0.1;
     let variance_y = 6.0;
-    let sea_level = GRID_WIDTH - 17;
+    let sea_level = ground_level - 10;
 
     for x in 0..GRID_WIDTH {
         for y in 0..GRID_WIDTH {
             for z in 0..GRID_HEIGHT {
-                let cut_off = ground_level as f32 + (x as f32 * frequency_x).sin() * variance_x + (y as f32 * frequency_y).sin() * variance_y;
+                let cut_off = ground_level as f32
+                    + (x as f32 * frequency_x).sin() * variance_x + (x as f32 * frequency_x * 4.0).sin() * variance_x / 8.0
+                    + (y as f32 * frequency_y).sin() * variance_y+ (y as f32 * frequency_y * 4.0).sin() * variance_y / 8.0;
                 let cut_off = cut_off as usize;
                 let coord = (x,y,z);
                 let index = grid.get_vector_pos(coord).unwrap();
@@ -710,7 +712,7 @@ fn get_screen_coord(world_space: (usize, usize, usize)) -> (usize, usize) {
     let sy =  (x + y - 2 * z) * (TILE_HALF_WIDTH / 2) as i32;
     (
         (sx + (SCREEN_WIDTH / 2) as i32) as usize,
-        (sy + (SCREEN_HEIGHT / 2) as i32) as usize - SCREEN_Y_OFFSET,
+        ((sy + (SCREEN_HEIGHT / 2) as i32) - SCREEN_Y_OFFSET as i32) as usize,
     )
 }
 

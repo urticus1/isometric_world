@@ -227,7 +227,7 @@ impl Cube {
     }
 
     pub fn is_walkable(&self) -> bool {
-        self.cube_type != WATER_CUBE && self.cube_type != EMPTY_CUBE
+        self.cube_type != WATER_CUBE && self.cube_type != EMPTY_CUBE && self.agent.is_none()
     }
 
     pub fn is_transparent(&self) -> bool {
