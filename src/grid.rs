@@ -1,3 +1,5 @@
+use std::cmp::max;
+use std::ops;
 use std::ops::{Index, IndexMut};
 use crate::{Agent, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH, VIEW_WIDTH, WATER_CUBE};
 
@@ -54,6 +56,11 @@ impl Grid {
         let move_cube = self.grid[from_index].clone();
         self.grid[to_index] = move_cube;
         self.grid[from_index] = Cube::new(EMPTY_CUBE);
+    }
+
+    pub fn delete_cube(&mut self, pos: (usize, usize, usize)) {
+        let index = self.get_vector_pos(pos);
+        self.grid[index] = Cube::new(EMPTY_CUBE);
     }
 
     pub fn spawn_agent(&mut self, agent: &Agent) {
@@ -181,6 +188,18 @@ impl Light {
             interpolate(min.y_level, max.y_level),
             interpolate(min.z_level, max.z_level),
         )
+    }
+}
+
+impl ops::Add<Light> for Light {
+    type Output = Light;
+
+    fn add(self, _rhs: Light) -> Light {
+        Light {
+            x_level: max(self.x_level, _rhs.x_level),
+            y_level: max(self.y_level, _rhs.y_level),
+            z_level: max(self.z_level, _rhs.z_level),
+        }
     }
 }
 

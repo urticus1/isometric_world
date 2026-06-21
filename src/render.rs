@@ -48,7 +48,7 @@ pub fn light_flood_fill(start: (usize, usize, usize), grid: &mut Grid) {
         for current in layer {
             seen.insert(current);
             let mut cube = grid.get_cube_mut(current);
-            cube.light_level = Light::from_level(light_level);
+            cube.light_level = cube.light_level + Light::from_level(light_level);
 
             for neighbour in find_face_neighbours(current) {
                 if seen.contains(&neighbour) || !cube.is_transparent() {
