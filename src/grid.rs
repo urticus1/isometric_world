@@ -43,42 +43,46 @@ impl Grid {
         Some(self.grid[i + self.width * self.width])
     }
 
-    pub fn get_vector_pos(&self, world_space: (usize, usize, usize)) -> usize {
-        world_space.0 + world_space.1 * self.width + world_space.2 * self.width * self.width
+    pub fn get_vector_pos(&self, world_space: (usize, usize, usize)) -> Result<usize, String> {
+        let index = world_space.0 + world_space.1 * self.width + world_space.2 * self.width * self.width;
+        if index >= self.grid.len() {
+            return Err(format!("Index out of bounds: {}", index));
+        };
+        Ok(index)
     }
 
     pub fn move_cube(&mut self, from: (usize, usize, usize), to: (usize, usize, usize)) {
         if from == to {
             return;
         }
-        let from_index = self.get_vector_pos(from);
-        let to_index = self.get_vector_pos(to);
+        let from_index = self.get_vector_pos(from).unwrap();
+        let to_index = self.get_vector_pos(to).unwrap();
         let move_cube = self.grid[from_index].clone();
         self.grid[to_index] = move_cube;
         self.grid[from_index] = Cube::new(EMPTY_CUBE);
     }
 
     pub fn delete_cube(&mut self, pos: (usize, usize, usize)) {
-        let index = self.get_vector_pos(pos);
+        let index = self.get_vector_pos(pos).unwrap();
         self.grid[index] = Cube::new(EMPTY_CUBE);
     }
 
     pub fn spawn_agent(&mut self, agent: &Agent) {
-        let index = self.get_vector_pos(agent.position);
+        let index = self.get_vector_pos(agent.position).unwrap();
         self.grid[index] = Cube::with_agent(agent.id as u8);
     }
 
     pub fn get_cube(&self, pos: (usize, usize, usize)) -> &Cube {
-        &self.grid[self.get_vector_pos(pos)]
+        &self.grid[self.get_vector_pos(pos).unwrap()]
     }
 
     pub fn get_cube_mut(&mut self, pos: (usize, usize, usize)) -> &mut Cube {
-        let index = self.get_vector_pos(pos);
+        let index = self.get_vector_pos(pos).unwrap();
         &mut self.grid[index]
     }
 
     pub fn is_occupied(&self, position: (usize, usize, usize)) -> bool {
-        let index = self.get_vector_pos(position);
+        let index = self.get_vector_pos(position).unwrap();
         self.grid[index].agent.is_some() || self.grid[index].cube_type != EMPTY_CUBE
     }
 }

@@ -110,7 +110,7 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
             AgentTask::Plough { target } => {
                 if agent.position.2 > 0 {
                     if let Ok(mut grid) = grid.lock() {
-                        let index = grid.get_vector_pos(*target);
+                        let index = grid.get_vector_pos(*target).unwrap();
                         grid[index].cube_type = 4;
                         light_flood_fill((target.0, target.1, target.2 + 1), &mut *grid);
                     }
@@ -121,7 +121,7 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
             AgentTask::Dig { target } => {
                 if agent.position.2 > 0 {
                     if let Ok(mut grid) = grid.lock() {
-                        let index = grid.get_vector_pos(*target);
+                        let index = grid.get_vector_pos(*target).unwrap();
                         grid[index].cube_type = EMPTY_CUBE;
                     }
                 }
@@ -629,7 +629,7 @@ fn prepare_grid() -> Grid {
                 let cut_off = ground_level as f32 + (x as f32 * frequency_x).sin() * variance_x + (y as f32 * frequency_y).sin() * variance_y;
                 let cut_off = cut_off as usize;
                 let coord = (x,y,z);
-                let index = grid.get_vector_pos(coord);
+                let index = grid.get_vector_pos(coord).unwrap();
                 if z > cut_off {
                     if z > sea_level {
                         grid[index] = Cube::new(EMPTY_CUBE);
@@ -658,7 +658,7 @@ fn prepare_grid() -> Grid {
         for j in 0..GRID_WIDTH {
             for k in 0..GRID_HEIGHT {
                 if (i as i32 - epicentre.0 as i32).pow(2) + (j as i32 - epicentre.1 as i32).pow(2) + (k as i32 - epicentre.2 as i32).pow(2) < 60 {
-                    let index = grid.get_vector_pos((i,j,k));
+                    let index = grid.get_vector_pos((i,j,k)).unwrap();
                     grid[index] = Cube::new(EMPTY_CUBE);
                 }
             }
@@ -699,25 +699,29 @@ fn select_cube_mouse(screen_space: (i32, i32), grid: &Grid, view_point: (usize, 
     let b = sy / (TILE_HALF_WIDTH / 2) as f32;
 
     for z in (0..VIEW_HEIGHT as i32).rev() {
-        let pz = z;
 
         let x = ((a + b + 2.0 * z as f32) / 2.0).round() as i32;
         let y = ((b - a + 2.0 * z as f32) / 2.0).round() as i32;
 
-        if x < 0 || y < 0 || pz < 0 {
-            continue;
+        if x < 0 || y < 0 {
+            continue; //outside of the grid
         }
 
-        let pos = (x as usize, y as usize, pz as usize);
+        let pos = (x as usize, y as usize, z as usize);
 
-        let index = grid.get_vector_pos((x as usize + view_point.0, y as usize + view_point.1, pz as usize + view_point.2));
-        if index >= GRID_WIDTH * GRID_WIDTH * GRID_HEIGHT {
-            return None;
+        let index = grid.get_vector_pos((x as usize + view_point.0, y as usize + view_point.1, z as usize + view_point.2));
+        match index {
+            Ok(_) => {
+                let cube = grid.get_cube((x as usize + view_point.0, y as usize + view_point.1, z as usize + view_point.2));
+                if cube.cube_type != EMPTY_CUBE || cube.agent.is_some() {
+                    return Some(pos);
+                }
+            },
+            Err(_) => {
+                continue
+            }
         }
-        let cube = grid.get_cube((x as usize + view_point.0, y as usize + view_point.1, pz as usize + view_point.2));
-        if cube.cube_type != EMPTY_CUBE || cube.agent.is_some() {
-            return Some(pos);
-        }
+
     }
     None
 }
