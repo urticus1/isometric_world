@@ -378,7 +378,9 @@ fn main() {
             if input_buffer.button_pressed(Key::X) {
                 {
                     let mut grid_lock = read_only_grid.lock().unwrap();
-                    grid_lock.delete_cube((sel.0 + view_x, sel.1 + view_y, sel.2 + view_z));
+                    if let None = grid_lock.get_cube((sel.0 + view_x, sel.1 + view_y, sel.2 + view_z)).agent {
+                        grid_lock.delete_cube((sel.0 + view_x, sel.1 + view_y, sel.2 + view_z));
+                    }
                 }
             }
 
