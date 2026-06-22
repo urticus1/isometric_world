@@ -17,6 +17,7 @@ use std::time::Duration;
 use image::{open, Frame};
 use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
 use minifb::Key::{K, R};
+use rand::{random, random_range};
 use crate::agents::{find_path, Agent, AgentCoroutine, AgentEvent, AgentTask};
 use crate::agents::AgentEvent::AgentAddTask;
 use crate::animation::{Animation, AnimationPool};
@@ -32,7 +33,7 @@ const SCREEN_Y_OFFSET: usize = SCREEN_HEIGHT / 4;
 const TILE_WIDTH: usize = 24;
 const TILE_HALF_WIDTH: usize = TILE_WIDTH / 2;
 
-const GRID_HEIGHT: usize = 120;
+const GRID_HEIGHT: usize = 60;
 const GRID_WIDTH: usize = 120;
 
 const VIEW_HEIGHT: usize = 20;
@@ -115,7 +116,7 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
                     if let Ok(mut grid) = grid.lock() {
                         let index = grid.get_vector_pos(*target).unwrap();
                         grid[index].cube_type = 4;
-                        light_flood_fill((target.0, target.1, target.2 + 1), &mut *grid);
+                        light_flood_fill((target.0, target.1, target.2), &mut *grid);
                     }
                 }
 
@@ -422,6 +423,11 @@ fn main() {
                     });
                 }
             }
+            if input_buffer.button_pressed(Key::H) {
+                view_x = GRID_WIDTH - VIEW_WIDTH;
+                view_y = GRID_WIDTH - VIEW_WIDTH;
+                view_z = GRID_HEIGHT - VIEW_HEIGHT;
+            }
         }
 
         if let Some((sx, sy)) = window.get_mouse_pos(MouseMode::Clamp) {
@@ -542,6 +548,7 @@ fn prepare_grid() -> Grid {
     let variance_y = 6.0;
     let sea_level = ground_level - 10;
 
+
     for x in 0..GRID_WIDTH {
         for y in 0..GRID_WIDTH {
             for z in 0..GRID_HEIGHT {
@@ -573,19 +580,22 @@ fn prepare_grid() -> Grid {
         }
     }
 
-    let epicentre= (GRID_WIDTH / 2, GRID_WIDTH / 2, GRID_HEIGHT -1);
-
-    for i in 0..GRID_WIDTH {
-        for j in 0..GRID_WIDTH {
-            for k in 0..GRID_HEIGHT {
-                if (i as i32 - epicentre.0 as i32).pow(2) + (j as i32 - epicentre.1 as i32).pow(2) + (k as i32 - epicentre.2 as i32).pow(2) < 60 {
-                    let index = grid.get_vector_pos((i,j,k)).unwrap();
-                    grid[index] = Cube::new(EMPTY_CUBE);
+    for i in 0..20 {
+        let epicentre= (random_range(0..GRID_WIDTH), random_range(0..GRID_WIDTH), random_range(0..GRID_HEIGHT));
+        let size = random_range(30..100);
+        for i in 0..GRID_WIDTH {
+            for j in 0..GRID_WIDTH {
+                for k in 0..GRID_HEIGHT {
+                    if (i as i32 - epicentre.0 as i32).pow(2) + (j as i32 - epicentre.1 as i32).pow(2) + (k as i32 - epicentre.2 as i32).pow(2) < size {
+                        let index = grid.get_vector_pos((i,j,k)).unwrap();
+                        grid[index] = Cube::new(EMPTY_CUBE);
+                    }
                 }
             }
         }
     }
-    light_flood_fill((84, 78, 112), &mut grid);
+
+
     grid
 }
 

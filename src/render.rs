@@ -37,27 +37,26 @@ pub fn light_flood_fill(start: (usize, usize, usize), grid: &mut Grid) {
     let mut queue = VecDeque::new();
     let mut seen = HashSet::new();
     queue.push_back(start);
+    seen.insert(start);
 
     let mut light_level = 10;
     while !queue.is_empty() && light_level > 0 {
-        let mut layer = vec![];
-        for i in 0..queue.len() {
-            layer.push(queue.pop_front().unwrap());
-        }
-
-        for current in layer {
-            seen.insert(current);
+        let layer_size = queue.len();
+        for i in 0..layer_size {
+            let current = queue.pop_front().unwrap();
             let mut cube = grid.get_cube_mut(current);
             cube.light_level = cube.light_level + Light::from_level(light_level);
 
+            if !cube.is_transparent() {
+                continue;
+            }
             for neighbour in find_face_neighbours(current) {
-                if seen.contains(&neighbour) || !cube.is_transparent() {
-                    continue;
+                if !seen.contains(&neighbour) {
+                    seen.insert(neighbour);
+                    queue.push_back(neighbour);
                 }
-                queue.push_back(neighbour);
             }
         }
-        println!("light level: {}", light_level);
         light_level -= 1;
     }
 }
