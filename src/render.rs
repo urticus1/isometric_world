@@ -33,13 +33,13 @@ impl Sprite {
     }
 }
 
-pub fn light_flood_fill(start: (usize, usize, usize), grid: &mut Grid) {
+pub fn light_flood_fill(start: (usize, usize, usize), light_level: u8, grid: &mut Grid) {
     let mut queue = VecDeque::new();
     let mut seen = HashSet::new();
     queue.push_back(start);
     seen.insert(start);
 
-    let mut light_level = 10;
+    let mut light_level = light_level;
     while !queue.is_empty() && light_level > 0 {
         let layer_size = queue.len();
         for i in 0..layer_size {

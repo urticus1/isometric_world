@@ -4,6 +4,7 @@ mod grid;
 mod animation;
 mod input;
 mod resources;
+mod events;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -14,13 +15,15 @@ use std::sync::mpsc::Sender;
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
-use image::{open, Frame};
+use image::{open, Frame, RgbaImage};
 use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
 use minifb::Key::{K, R};
+use noise::{NoiseFn, Perlin};
 use rand::{random, random_range};
 use crate::agents::{find_path, Agent, AgentCoroutine, AgentEvent, AgentTask};
 use crate::agents::AgentEvent::AgentAddTask;
 use crate::animation::{Animation, AnimationPool};
+use crate::events::{EventQueue, GridChangeEvent};
 use crate::grid::{find_horizontal_neighbours, get_manhattan_distance, is_horizontal_neighbour, Cube, Grid, Light};
 use crate::input::{InputBuffer, InputState};
 use crate::render::{draw_face, draw_sprite, light_flood_fill, Face, Sprite};
@@ -34,12 +37,13 @@ const TILE_WIDTH: usize = 24;
 const TILE_HALF_WIDTH: usize = TILE_WIDTH / 2;
 
 const GRID_HEIGHT: usize = 60;
-const GRID_WIDTH: usize = 120;
+const GRID_WIDTH: usize = 300;
 
 const VIEW_HEIGHT: usize = 20;
 const VIEW_WIDTH: usize = 60;
 
 const EMPTY_CUBE: u8 = 255;
+const STONE_CUBE: u8 = 0;
 const WATER_CUBE: u8 = 6;
 const LANTERN_CUBE: u8 = 7;
 
@@ -116,7 +120,6 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
                     if let Ok(mut grid) = grid.lock() {
                         let index = grid.get_vector_pos(*target).unwrap();
                         grid[index].cube_type = 4;
-                        light_flood_fill((target.0, target.1, target.2), &mut *grid);
                     }
                 }
 
@@ -125,8 +128,7 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
             AgentTask::Dig { target } => {
                 if agent.position.2 > 0 {
                     if let Ok(mut grid) = grid.lock() {
-                        let index = grid.get_vector_pos(*target).unwrap();
-                        grid[index].cube_type = EMPTY_CUBE;
+                        grid.delete_cube(*target);
                     }
                 }
                 completed = true;
@@ -149,7 +151,9 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
 
 fn main() {
     let sprites = load_cube_sprites();
-    let grid = Arc::new(Mutex::new(prepare_grid()));
+
+    let (grid_events_sender, grid_events_receiver) = mpsc::channel();
+    let grid = Arc::new(Mutex::new(prepare_grid(grid_events_sender)));
     let worker_animations = Arc::new(load_animations());
     let select_cube = Sprite::new("resources/24/select_cube.png");
 
@@ -195,11 +199,20 @@ fn main() {
     let agents: Arc<Mutex<Vec<Agent>>> = Arc::new(Mutex::new(vec![man, man2]));
     let agent_clone = Arc::clone(&agents);
     let grid_clone = Arc::clone(&grid);
-
     let mut game_tick: u32 = 0;
     let agent_loop = thread::spawn(move || {
         loop {
 
+            for event in grid_events_receiver.try_iter() {
+                {
+                    let mut grid_lock = grid_clone.lock().unwrap();
+                    grid_lock.handle_grid_change_event(&event);
+                }
+            }
+            {
+                let mut grid_lock = grid_clone.lock().unwrap();
+                grid_lock.update_active_water();
+            }
             {
                 //println!("game tick: {}", gate_tick);
                 let mut mut_agents =  agent_clone.lock().unwrap();
@@ -354,19 +367,6 @@ fn main() {
         }
 
         if let Some(sel) = selected_cube {
-            if  input_buffer.button_pressed(Key::Right) && sel.0 < VIEW_WIDTH {
-                selected_cube = Some((sel.0 + 1, sel.1, sel.2));
-            }
-            if  input_buffer.button_pressed(Key::Left) && sel.0 > 0 {
-                selected_cube = Some((sel.0 - 1, sel.1, sel.2));
-            }
-            if  input_buffer.button_pressed(Key::Down) && sel.1 < VIEW_WIDTH {
-                selected_cube = Some((sel.0, sel.1 + 1, sel.2));
-            }
-            if  input_buffer.button_pressed(Key::Up) && sel.1 > 0 {
-                selected_cube = Some((sel.0, sel.1 - 1, sel.2));
-            }
-            
             if input_buffer.button_pressed(Key::Space) || input_buffer.left_mouse_pressed() {
                 {
                     let grid_lock = read_only_grid.lock().unwrap();
@@ -380,6 +380,16 @@ fn main() {
                     let mut grid_lock = read_only_grid.lock().unwrap();
                     if let None = grid_lock.get_cube((sel.0 + view_x, sel.1 + view_y, sel.2 + view_z)).agent {
                         grid_lock.delete_cube((sel.0 + view_x, sel.1 + view_y, sel.2 + view_z));
+                    }
+                }
+            }
+
+            if input_buffer.right_mouse_pressed() {
+                let above = (sel.0 + view_x, sel.1 + view_y, sel.2 + view_z + 1);
+                if above.2 < GRID_HEIGHT {
+                    let mut grid_lock = read_only_grid.lock().unwrap();
+                    if !grid_lock.is_occupied(above) {
+                        grid_lock.place_cube(above, Cube::new(STONE_CUBE));
                     }
                 }
             }
@@ -412,14 +422,7 @@ fn main() {
                     let _ = game_events.send(AgentAddTask {
                         task: AgentTask::Place {
                             target: world_pos,
-                            cube: Cube {
-                                cube_type: LANTERN_CUBE,
-                                cube_x_face: None,
-                                cube_y_face: None,
-                                cube_z_face: None,
-                                agent: None,
-                                light_level: Light::min_level(),
-                            }
+                            cube: Cube::new(LANTERN_CUBE)
                         },
                         agent: agent_id as usize,
                     });
@@ -474,29 +477,29 @@ fn main() {
                         let grid = read_only_grid.lock().unwrap();
                         if let Some(next_x) = grid.get_cube_next_x(cube_index) {
                             if next_x.is_transparent() || x == VIEW_WIDTH - 1 {
-                                let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
+                                let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
                                 draw_face(Face::RIGHT,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
                             }
                         }
                         else {
-                            let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
+                            let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
                             draw_face(Face::RIGHT,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
                         }
 
                         if let Some(next_y) = grid.get_cube_next_y(cube_index) {
                             if next_y.is_transparent() || y == VIEW_WIDTH - 1 {
-                                let face = cube_data.cube_y_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
+                                let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
                                 draw_face(Face::LEFT, (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
                             }
                         }
                         else {
-                            let face = cube_data.cube_y_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
+                            let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
                             draw_face(Face::LEFT,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
                         }
 
                         if let Some(next_z) = grid.get_cube_above(cube_index) {
                             if next_z.is_transparent() {
-                                let face = cube_data.cube_z_face.map_or(&sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
+                                let face = cube_data.cube_z_face.map_or(find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
                                 draw_face(Face::TOP,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.z_level, cube_light.z_level, cube_light.z_level))
                             }
                             else if z == VIEW_HEIGHT - 1 {
@@ -504,7 +507,7 @@ fn main() {
                             }
                         }
                         else {
-                            let face = cube_data.cube_x_face.map_or( &sprites[cube_data.cube_type as usize], |x| { &sprites[x as usize] });
+                            let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
                             draw_face(Face::TOP,(cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.z_level, cube_light.z_level, cube_light.z_level))
                         }
                     }
@@ -518,6 +521,28 @@ fn main() {
     }
 }
 
+fn find_sprite<'a>(cube_data: &Cube, sprites: &'a Vec<Sprite>) -> &'a Sprite {
+    if cube_data.cube_type == WATER_CUBE {
+        if cube_data.water_level >= 100.0 {
+            &sprites[cube_data.cube_type as usize]
+        }
+        else if cube_data.water_level > 50.0 {
+            &sprites[cube_data.cube_type as usize + 2]
+        }
+        else if cube_data.water_level > 25.0 {
+            &sprites[cube_data.cube_type as usize + 3]
+        }
+        else if cube_data.water_level > 1.0 {
+            &sprites[cube_data.cube_type as usize + 4]
+        }
+        else {
+            &sprites[cube_data.cube_type as usize + 4]
+        }
+    }
+    else {
+        return &sprites[cube_data.cube_type as usize];
+    }
+}
 
 fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube: (usize, usize, usize), selection_state: &mut InputState) {
     if let Some(agent) = cube.agent {
@@ -539,10 +564,33 @@ fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube
 
 }
 
-fn prepare_grid() -> Grid {
-    let mut grid = Grid::new(GRID_WIDTH, GRID_HEIGHT);
+fn perlin_noise() {
 
+}
 
+struct PerlinNoise {
+    pub pixels: RgbaImage,
+    pub z_scale: f32,
+}
+
+impl PerlinNoise {
+    pub fn get_noise(&self, x: usize, y: usize) -> f32 {
+        let width = self.pixels.width();
+        let height = self.pixels.height();
+        let x = x % width as usize;
+        let y = y % height as usize;
+        let val = self.pixels.get_pixel(x as u32, y as u32);
+        val.0[0] as f32 * self.z_scale
+    }
+}
+
+fn prepare_grid(events: Sender<GridChangeEvent>) -> Grid {
+    let mut grid = Grid::new(GRID_WIDTH, GRID_HEIGHT, events);
+
+    let perlin = PerlinNoise {
+        pixels: open(Path::new("resources/perlin_greyscale.png")).unwrap().into_rgba8(),
+        z_scale: 0.07,
+    };
     let ground_level = GRID_HEIGHT - 20;
     let frequency_x: f32 = 0.2;
     let variance_x = 5.0;
@@ -554,9 +602,10 @@ fn prepare_grid() -> Grid {
     for x in 0..GRID_WIDTH {
         for y in 0..GRID_WIDTH {
             for z in 0..GRID_HEIGHT {
-                let cut_off = ground_level as f32
-                    + (x as f32 * frequency_x).sin() * variance_x + (x as f32 * frequency_x * 4.0).sin() * variance_x / 8.0
-                    + (y as f32 * frequency_y).sin() * variance_y+ (y as f32 * frequency_y * 4.0).sin() * variance_y / 8.0;
+                let val = perlin.get_noise(x, y);
+                let cut_off= ground_level as f32 + val as f32;// = ground_level as f32
+                    //+ (x as f32 * frequency_x).sin() * variance_x + (x as f32 * frequency_x * 4.0).sin() * variance_x / 8.0
+                    //+ (y as f32 * frequency_y).sin() * variance_y+ (y as f32 * frequency_y * 4.0).sin() * variance_y / 8.0;
                 let cut_off = cut_off as usize;
                 let coord = (x,y,z);
                 let index = grid.get_vector_pos(coord).unwrap();
@@ -565,7 +614,8 @@ fn prepare_grid() -> Grid {
                         grid[index] = Cube::new(EMPTY_CUBE);
                     }
                     else {
-                        grid[index] = Cube::new(6);
+                        grid[index] = Cube::new(WATER_CUBE);
+                        grid[index].water_level = 100.0;
                     }
                 }
                 else if z == cut_off {

@@ -63,6 +63,18 @@ impl InputBuffer {
         else {
             self.left_mouse_state = ButtonState::Released;
         }
+
+        if right_mouse_down {
+            if self.right_mouse_state == Pressed {
+                self.right_mouse_state = ButtonState::Held;
+            }
+            else {
+                self.right_mouse_state = ButtonState::Pressed;
+            }
+        }
+        else {
+            self.right_mouse_state = ButtonState::Released;
+        }
     }
 
     pub fn left_mouse_pressed(&self) -> bool {

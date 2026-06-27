@@ -1,22 +1,166 @@
-use std::cmp::max;
+use std::cmp::{max, min};
+use std::collections::{HashSet, VecDeque};
 use std::ops;
 use std::ops::{Index, IndexMut};
+use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use crate::{Agent, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH, LANTERN_CUBE, VIEW_WIDTH, WATER_CUBE};
+use crate::events::{EventQueue, GridChangeEvent};
 use crate::render::light_flood_fill;
 
 pub struct Grid {
     pub grid: Vec<Cube>,
     width: usize,
-    height: usize
+    height: usize,
+    events: Sender<GridChangeEvent>,
+    active_water: VecDeque<(usize, usize, usize)>,
 }
 
 impl Grid {
 
-    pub fn new(width: usize, height: usize) -> Grid {
+    pub fn update_active_water(&mut self) {
+        let length = self.active_water.len();
+        for i in 0..length {
+            let water = self.active_water.pop_front().unwrap();
+            let below = (water.0, water.1, water.2 - 1);
+            let cube_below = self.get_cube(below);
+            if cube_below.cube_type == EMPTY_CUBE {
+                self.move_cube(water, below);
+                self.active_water.push_back(below);
+            }
+            else if cube_below.cube_type == WATER_CUBE && cube_below.water_level != 100.0 {
+                let water_below = cube_below.water_level;
+                let diff = 100.0 - water_below;
+                let water_above = self.get_cube_mut(water);
+                if water_above.water_level > diff {
+                    water_above.water_level -= diff;
+                    self.get_cube_mut(below).water_level += diff;
+                    self.active_water.push_back(water);
+                }
+                else {
+                    self.get_cube_mut(below).water_level += water_above.water_level;
+                    self.delete_cube(water);
+                }
+            }
+            else {
+                let mut changed_cubes = vec![];
+
+                let original_water = self.get_cube(water);
+                let mut volume_available = original_water.water_level;
+                for neighbour in find_horizontal_neighbours(water) {
+                    let neighbour_cube = self.get_cube(neighbour);
+                    if !(neighbour_cube.cube_type == WATER_CUBE || neighbour_cube.cube_type == EMPTY_CUBE) {
+                        continue;
+                    }
+                    if neighbour_cube.water_level < original_water.water_level - 0.1 || neighbour_cube.water_level > original_water.water_level + 0.1 {
+                        changed_cubes.push(neighbour);
+                        volume_available += neighbour_cube.water_level;
+                    }
+                }
+                if (changed_cubes.is_empty()) {
+                    return;
+                }
+                let volume = volume_available / changed_cubes.len() as f32;
+
+                if original_water.water_level < volume - 0.1 || original_water.water_level > volume + 0.1 {
+                    changed_cubes.push(water);
+                }
+                for cube in changed_cubes {
+                    if volume > 1.0 {
+                        self.get_cube_mut(cube).water_level = volume;
+                        self.get_cube_mut(cube).cube_type = WATER_CUBE;
+                        self.active_water.push_back(cube);
+                    }
+                    else {
+                        self.delete_cube(cube);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+    pub fn update_active_water(&mut self) {
+        let length = self.active_water.len();
+        for i in 0..length {
+            let water = self.active_water.pop().unwrap();
+            let below = (water.0, water.1, water.2 - 1);
+            let cube_below = self.get_cube(below);
+            if cube_below.cube_type == EMPTY_CUBE {
+                self.move_cube(water, below);
+                self.active_water.push(below);
+            }
+            else if cube_below.cube_type == WATER_CUBE {
+                let water_below = cube_below.water_level;
+                let diff = 100.0 - water_below;
+                let water_above = self.get_cube_mut(water);
+                if water_above.water_level > diff {
+                    water_above.water_level -= diff;
+                    self.get_cube_mut(below).water_level += diff;
+                    self.active_water.push(water);
+                }
+                else {
+                    self.get_cube_mut(below).water_level += water_above.water_level;
+                    self.delete_cube(water);
+                }
+            }
+            else {
+                let mut water_in_layer = HashSet::new();
+                let mut queue = VecDeque::new();
+                queue.push_back(water);
+                water_in_layer.insert(water);
+
+                let mut volume = 0.0;
+                while !queue.is_empty() {
+                    let current = queue.pop_front().unwrap();
+                    let current_data = self.get_cube(current);
+                    volume += current_data.water_level;
+
+                    for neighbour in find_horizontal_neighbours(current) {
+                        let data = self.get_cube(neighbour);
+                        if water_in_layer.contains(&neighbour) || ! (data.cube_type == WATER_CUBE || data.cube_type == EMPTY_CUBE) {
+                            continue;
+                        }
+                        water_in_layer.insert(neighbour);
+                        queue.push_back(neighbour);
+                    }
+                }
+                volume = volume / water_in_layer.len() as f32;
+                for cube in water_in_layer {
+                    if volume > 1.0 {
+                        self.get_cube_mut(cube).water_level = volume;
+                        self.get_cube_mut(cube).cube_type = WATER_CUBE;
+                    }
+                    else {
+                        self.delete_cube(cube);
+                    }
+                }
+            }
+        }
+    }
+
+   */
+
+    pub fn handle_grid_change_event(&mut self, event: &GridChangeEvent) {
+        match event {
+            GridChangeEvent::Delete(pos) => {
+                let neighbours = find_face_neighbours(*pos);
+                for neighbour in neighbours {
+                    if self.get_cube(neighbour).cube_type == WATER_CUBE {
+                        self.active_water.push_back(neighbour);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn new(width: usize, height: usize, event_queue: Sender<GridChangeEvent>) -> Grid {
         Grid {
             grid: vec![Cube::new(0); width * width * height],
             width: width,
-            height: height
+            height: height,
+            events: event_queue,
+            active_water: VecDeque::new()
         }
     }
 
@@ -58,19 +202,30 @@ impl Grid {
         let to_index = self.get_vector_pos(to).unwrap();
         let move_cube = self.grid[from_index].clone();
         self.grid[to_index] = move_cube;
-        self.grid[from_index] = Cube::new(EMPTY_CUBE);
+        self.delete_cube(from);
     }
 
     pub fn delete_cube(&mut self, pos: (usize, usize, usize)) {
         let index = self.get_vector_pos(pos).unwrap();
-        self.grid[index] = Cube::new(EMPTY_CUBE);
+        let mut cube = self.grid[index];
+        cube.cube_type = EMPTY_CUBE;
+        cube.cube_x_face = None;
+        cube.cube_y_face = None;
+        cube.cube_z_face = None;
+        let send_event = cube.agent.is_none();
+        cube.agent = None;
+        self.grid[index] = cube;
+        if send_event {
+            self.events.send(GridChangeEvent::Delete(pos));
+        }
+
     }
 
     pub fn place_cube(&mut self, pos: (usize, usize, usize), cube: Cube) {
         let index = self.get_vector_pos(pos).unwrap();
         self.grid[index] = cube;
         if cube.cube_type == LANTERN_CUBE {
-            light_flood_fill(pos, self);
+            light_flood_fill(pos, 10, self);
         }
     }
 
@@ -150,6 +305,7 @@ pub struct Cube {
     pub cube_z_face: Option<u8>,
     pub agent: Option<u8>,
     pub light_level: Light,
+    pub water_level: f32
 }
 
 #[derive(Copy, Clone)]
@@ -222,7 +378,8 @@ impl Cube {
             cube_x_face: None,
             cube_z_face: None,
             agent: None,
-            light_level: Light::min_level()
+            light_level: Light::min_level(),
+            water_level: 0.0
         }
     }
 
@@ -241,7 +398,8 @@ impl Cube {
             cube_x_face: None,
             cube_z_face: None,
             agent: Some(agent),
-            light_level: Light::min_level()
+            light_level: Light::min_level(),
+            water_level: 0.0
         }
     }
 }

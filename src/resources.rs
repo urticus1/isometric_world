@@ -110,6 +110,9 @@ pub fn load_cube_sprites() -> Vec<Sprite> {
 
     let water = Sprite::new("resources/24/water.png");
     let lantern = Sprite::new("resources/24/lantern.png");
+    let water_half = Sprite::new("resources/24/water_half.png");
+    let water_quarter = Sprite::new("resources/24/water_quarter.png");
+    let water_small = Sprite::new("resources/24/water_small.png");
 
-    vec![stone, mud, grass, blank, floor, man, water, lantern]
+    vec![stone, mud, grass, blank, floor, man, water, lantern, water_half, water_quarter, water_small]
 }

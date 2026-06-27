@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 image = "0.25.10"
 minifb = "0.25"
+noise = "0.9.0"
 rand = "0.10.1"
