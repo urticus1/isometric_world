@@ -4,9 +4,10 @@ use std::ops;
 use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
-use crate::{Agent, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH, LANTERN_CUBE, VIEW_WIDTH, WATER_CUBE};
+use minifb::Key::N;
+use crate::{Agent, Compass, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH, LANTERN_CUBE, VIEW_WIDTH, WATER_CUBE};
 use crate::events::{EventQueue, GridChangeEvent};
-use crate::render::light_flood_fill;
+use crate::render::{light_flood_fill, FaceReal};
 
 pub struct Grid {
     pub grid: Vec<Cube>,
@@ -164,18 +165,102 @@ impl Grid {
         }
     }
 
-    pub fn get_cube_next_x(&self, i: usize) -> Option<Cube> {
-        if i % self.width == self.width -1 {
-            return None
+    pub fn get_blocking_cube_x(&self, compass: &Compass, i: usize) -> Option<Cube> {
+        return match compass {
+            Compass::North => {
+                if i % self.width == self.width -1 {
+                    return None
+                }
+                Some(self.grid[i + 1])
+            },
+            Compass::East => {
+                if i % self.width == self.width -1 {
+                    return None
+                }
+                Some(self.grid[i + 1])
+            },
+            Compass::South => {
+                if i % self.width == 0 {
+                    return None
+                }
+                Some(self.grid[i + 1])
+            },
+            Compass::West => {
+                if i % self.width == 0 {
+                    return None
+                }
+                Some(self.grid[i - 1])
+            },
+            _ => None
         }
-        Some(self.grid[i + 1])
     }
 
-    pub fn get_cube_next_y(&self, i: usize) -> Option<Cube> {
-        if i % (self.width * self.width) + self.width >= self.width * self.width {
-            return None
+    pub fn get_blocking_cube(&self, face: &FaceReal, i: usize) -> Option<Cube> {
+        return match face {
+            FaceReal::nY => {
+                if (i % (self.width * self.width)) / self.width == 0 {
+                    return None
+                }
+                Some(self.grid[i - self.width])
+            },
+            FaceReal::nX => {
+                if i % self.width == 0 {
+                    return None
+                }
+                Some(self.grid[i - 1])
+            },
+            FaceReal::pX => {
+                if i % self.width == GRID_WIDTH - 1 {
+                    return None
+                }
+                Some(self.grid[i + 1])
+            },
+            FaceReal::pY => {
+                if (i % (self.width * self.width)) / self.width == self.width - 1 {
+                    return None
+                }
+                Some(self.grid[i + self.width])
+            },
+            FaceReal::Z => {
+                let val = i + self.width * self.width;
+                if val >= self.height * self.width * self.width {
+                    return None;
+                }
+                Some(self.grid[i + self.width * self.width])
+            }
         }
-        Some(self.grid[i + self.width])
+
+    }
+
+    pub fn get_blocking_cube_y(&self, compass: &Compass, i: usize) -> Option<Cube> {
+        return match compass {
+            Compass::North => {
+                if i % (self.width * self.width) + self.width >= self.width * self.width {
+                    return None
+                }
+                Some(self.grid[i + self.width])
+            },
+            Compass::West => {
+                if i % (self.width * self.width) + self.width >= self.width * self.width {
+                    return None
+                }
+                Some(self.grid[i + self.width])
+            },
+            Compass::East => {
+                if i % (self.width * self.width) + self.width < self.width {
+                    return None
+                }
+                Some(self.grid[i - self.width])
+            },
+            Compass::South => {
+                if i % (self.width * self.width) + self.width < self.width {
+                    return None
+                }
+                Some(self.grid[i + self.width])
+            },
+            _ => None
+        }
+
     }
 
     pub fn get_cube_above(&self, i: usize) -> Option<Cube> {

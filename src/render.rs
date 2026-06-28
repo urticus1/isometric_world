@@ -1,7 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 use image::open;
-use crate::{SCREEN_WIDTH, TILE_WIDTH};
+use crate::{Compass, SCREEN_HEIGHT, SCREEN_WIDTH, TILE_WIDTH};
 use crate::grid::{find_face_neighbours, Grid, Light};
 
 const LEFT_FACE_PIXELS: [(usize, usize); 156] = [(0, 6), (1, 6), (0, 7), (1, 7), (2, 7), (3, 7), (0, 8), (1, 8), (2, 8), (3, 8), (4, 8), (5, 8), (0, 9), (1, 9), (2, 9), (3, 9), (4, 9), (5, 9), (6, 9), (7, 9), (0, 10), (1, 10), (2, 10), (3, 10), (4, 10), (5, 10), (6, 10), (7, 10), (8, 10), (9, 10), (0, 11), (1, 11), (2, 11), (3, 11), (4, 11), (5, 11), (6, 11), (7, 11), (8, 11), (9, 11), (10, 11), (11, 11), (0, 12), (1, 12), (2, 12), (3, 12), (4, 12), (5, 12), (6, 12), (7, 12), (8, 12), (9, 12), (10, 12), (11, 12), (0, 13), (1, 13), (2, 13), (3, 13), (4, 13), (5, 13), (6, 13), (7, 13), (8, 13), (9, 13), (10, 13), (11, 13), (0, 14), (1, 14), (2, 14), (3, 14), (4, 14), (5, 14), (6, 14), (7, 14), (8, 14), (9, 14), (10, 14), (11, 14), (0, 15), (1, 15), (2, 15), (3, 15), (4, 15), (5, 15), (6, 15), (7, 15), (8, 15), (9, 15), (10, 15), (11, 15), (0, 16), (1, 16), (2, 16), (3, 16), (4, 16), (5, 16), (6, 16), (7, 16), (8, 16), (9, 16), (10, 16), (11, 16), (0, 17), (1, 17), (2, 17), (3, 17), (4, 17), (5, 17), (6, 17), (7, 17), (8, 17), (9, 17), (10, 17), (11, 17), (0, 18), (1, 18), (2, 18), (3, 18), (4, 18), (5, 18), (6, 18), (7, 18), (8, 18), (9, 18), (10, 18), (11, 18), (2, 19), (3, 19), (4, 19), (5, 19), (6, 19), (7, 19), (8, 19), (9, 19), (10, 19), (11, 19), (4, 20), (5, 20), (6, 20), (7, 20), (8, 20), (9, 20), (10, 20), (11, 20), (6, 21), (7, 21), (8, 21), (9, 21), (10, 21), (11, 21), (8, 22), (9, 22), (10, 22), (11, 22), (10, 23), (11, 23)];
@@ -61,13 +61,16 @@ pub fn light_flood_fill(start: (usize, usize, usize), light_level: u8, grid: &mu
     }
 }
 
-pub fn draw_face(face: Face, screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, light: (u8, u8, u8)) {
+fn draw_face(face: Face, screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, light: (u8, u8, u8)) {
     let pixels = match face {
+        Face::TOP => TOP_FACE_PIXELS.iter(),
         Face::LEFT => LEFT_FACE_PIXELS.iter(),
         Face::RIGHT => RIGHT_FACE_PIXELS.iter(),
-        Face::TOP => TOP_FACE_PIXELS.iter()
     };
 
+    if screen_pos.0 > SCREEN_WIDTH || screen_pos.1 > SCREEN_HEIGHT {
+        return;
+    }
 
     for (x,y) in pixels {
         let value = sprite.pixels[x + y * TILE_WIDTH];
@@ -98,33 +101,30 @@ pub enum Face {
     TOP
 }
 
-pub fn draw_top_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, highlight_colour: u32) {
-    for (x,y) in TOP_FACE_PIXELS {
-        let value = sprite.pixels[x + y * TILE_WIDTH];
-        if value & ALPHA_MASK == 0 {
-            continue;
-        }
-        let pixel = (screen_pos.0 + SCREEN_WIDTH * screen_pos.1) + x + y * SCREEN_WIDTH;
-        if (pixel < buffer.len()) {
-            buffer[pixel] =  value.saturating_add(highlight_colour)
-        }
-    }
+pub enum FaceReal {
+    pX,
+    pY,
+    nX,
+    nY,
+    Z
 }
 
-pub fn draw_right_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, highlight_colour: u32) {
-    for (x,y) in RIGHT_FACE_PIXELS {
-        let value = sprite.pixels[x + y * TILE_WIDTH];
-        if value & ALPHA_MASK == 0 {
-            continue;
-        }
-        let pixel = (screen_pos.0 + SCREEN_WIDTH * screen_pos.1) + x + y * SCREEN_WIDTH;
-        if (pixel < buffer.len()) {
-            buffer[pixel] = value.saturating_add(highlight_colour)
-        }
-    }
+pub fn draw_top_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, light: (u8, u8, u8)) {
+    draw_face(Face::TOP, screen_pos, sprite, buffer, light);
+}
+
+pub fn draw_left_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, light: (u8, u8, u8)) {
+    draw_face(Face::LEFT, screen_pos, sprite, buffer, light);
+}
+
+pub fn draw_right_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, light: (u8, u8, u8)) {
+    draw_face(Face::RIGHT, screen_pos, sprite, buffer, light);
 }
 
 pub fn draw_sprite(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>) {
+    if screen_pos.0 > SCREEN_WIDTH || screen_pos.1 > SCREEN_HEIGHT {
+        return;
+    }
     for x in 0..TILE_WIDTH {
         for y in 0..TILE_WIDTH {
             let value = sprite.pixels[x + y * TILE_WIDTH];
