@@ -5,6 +5,7 @@ mod animation;
 mod input;
 mod resources;
 mod events;
+mod world_generation;
 
 use std::cell::RefCell;
 use std::cmp::PartialEq;
@@ -29,6 +30,7 @@ use crate::grid::{find_horizontal_neighbours, get_manhattan_distance, is_horizon
 use crate::input::{InputBuffer, InputState};
 use crate::render::{draw_left_face, draw_right_face, draw_sprite, draw_top_face, light_flood_fill, Face, FaceReal, Sprite};
 use crate::resources::{load_animations, load_cube_sprites};
+use crate::world_generation::{place_workers, prepare_grid};
 
 const SCREEN_WIDTH: usize = 2000;
 const SCREEN_HEIGHT: usize = 1200;
@@ -154,50 +156,16 @@ fn main() {
     let sprites = load_cube_sprites();
 
     let (grid_events_sender, grid_events_receiver) = mpsc::channel();
-    let grid = Arc::new(Mutex::new(prepare_grid(grid_events_sender)));
-    let worker_animations = Arc::new(load_animations());
+
+    let mut grid = prepare_grid(grid_events_sender);
+    let agents = place_workers(&mut grid);
+
+    let grid = Arc::new(Mutex::new(grid));
+    let agents: Arc<Mutex<Vec<Agent>>> = Arc::new(Mutex::new(agents));
+
     let select_cube = Sprite::new("resources/24/select_cube.png");
 
-    let man_x = GRID_WIDTH - 17;
-    let man_y = GRID_WIDTH - 30;
-    let man2_x = GRID_WIDTH - 17;
-    let man2_y = GRID_WIDTH - 31;
-
-    let (man_z, man2_z) = {
-        let grid_lock = grid.lock().unwrap();
-        (find_ground_spawn_z(&grid_lock, man_x, man_y), find_ground_spawn_z(&grid_lock, man2_x, man2_y))
-    };
-
-    let mut man = Agent {
-        animation: worker_animations.animations["idle"].clone(),
-        position: (man_x, man_y, man_z),
-        animation_pool: Arc::clone(&worker_animations),
-        name: "man".to_string(),
-        animation_state: 0,
-        destination: None,
-        tasks: vec![],
-        active_task: None,
-        id: 0
-    };
-
-    let mut man2 = Agent {
-        animation: worker_animations.animations["idle"].clone(),
-        position: (man2_x, man2_y, man2_z),
-        animation_pool: Arc::clone(&worker_animations),
-        name: "man2".to_string(),
-        animation_state: 0,
-        destination: None,
-        tasks: vec![],
-        active_task: None,
-        id: 1
-    };
-
-    grid.lock().unwrap().spawn_agent(&mut man);
-    grid.lock().unwrap().spawn_agent(&mut man2);
-
-
     let (game_events, game_events_receiver) = mpsc::channel();
-    let agents: Arc<Mutex<Vec<Agent>>> = Arc::new(Mutex::new(vec![man, man2]));
     let agent_clone = Arc::clone(&agents);
     let grid_clone = Arc::clone(&grid);
     let mut game_tick: u32 = 0;
@@ -630,92 +598,6 @@ fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube
 
 }
 
-fn perlin_noise() {
-
-}
-
-struct PerlinNoise {
-    pub pixels: RgbaImage,
-    pub z_scale: f32,
-}
-
-impl PerlinNoise {
-    pub fn get_noise(&self, x: usize, y: usize) -> f32 {
-        let width = self.pixels.width();
-        let height = self.pixels.height();
-        let x = x % width as usize;
-        let y = y % height as usize;
-        let val = self.pixels.get_pixel(x as u32, y as u32);
-        val.0[0] as f32 * self.z_scale
-    }
-}
-
-fn prepare_grid(events: Sender<GridChangeEvent>) -> Grid {
-    let mut grid = Grid::new(GRID_WIDTH, GRID_HEIGHT, events);
-
-    let perlin = PerlinNoise {
-        pixels: open(Path::new("resources/perlin_greyscale.png")).unwrap().into_rgba8(),
-        z_scale: 0.07,
-    };
-    let ground_level = GRID_HEIGHT - 20;
-    let frequency_x: f32 = 0.2;
-    let variance_x = 5.0;
-    let frequency_y = 0.1;
-    let variance_y = 6.0;
-    let sea_level = ground_level - 10;
-
-
-    for x in 0..GRID_WIDTH {
-        for y in 0..GRID_WIDTH {
-            for z in 0..GRID_HEIGHT {
-                let val = perlin.get_noise(x, y);
-                let cut_off= ground_level as f32 + val; // = ground_level as f32
-                    //+ (x as f32 * frequency_x).sin() * variance_x + (x as f32 * frequency_x * 4.0).sin() * variance_x / 8.0
-                    //+ (y as f32 * frequency_y).sin() * variance_y+ (y as f32 * frequency_y * 4.0).sin() * variance_y / 8.0;
-                let cut_off = cut_off as usize;
-                let coord = (x,y,z);
-                let index = grid.get_vector_pos(coord).unwrap();
-                if z > cut_off {
-                    if z > sea_level {
-                        grid[index] = Cube::new(EMPTY_CUBE);
-                    }
-                    else {
-                        grid[index] = Cube::new(WATER_CUBE);
-                        grid[index].water_level = 100.0;
-                    }
-                }
-                else if z == cut_off {
-                    grid[index] = Cube::new(2);
-                }
-                else if z < cut_off && z > cut_off - 5 {
-                    grid[index] = Cube::new(1);
-                }
-                else {
-                    grid[index] = Cube::new(0);
-                }
-            }
-
-        }
-    }
-
-    for i in 0..20 {
-        let epicentre= (random_range(0..GRID_WIDTH), random_range(0..GRID_WIDTH), random_range(0..GRID_HEIGHT));
-        let size = random_range(30..100);
-        for i in 0..GRID_WIDTH {
-            for j in 0..GRID_WIDTH {
-                for k in 0..GRID_HEIGHT {
-                    if (i as i32 - epicentre.0 as i32).pow(2) + (j as i32 - epicentre.1 as i32).pow(2) + (k as i32 - epicentre.2 as i32).pow(2) < size {
-                        let index = grid.get_vector_pos((i,j,k)).unwrap();
-                        grid[index] = Cube::new(EMPTY_CUBE);
-                    }
-                }
-            }
-        }
-    }
-
-
-    grid
-}
 
 fn find_ground_spawn_z(grid: &Grid, x: usize, y: usize) -> usize {
     for z in (0..GRID_HEIGHT).rev() {
@@ -754,65 +636,6 @@ fn get_screen_coord(compass: &Compass, world_space: (usize, usize, usize)) -> (u
         (sx + x_offset) as usize,
         (sy + y_offset) as usize
     )
-        /*
-    return match compass {
-        Compass::North => {
-            let camera_x= (1i32, -1i32, 0i32);
-            let camera_y=    (1i32,  1i32, -2i32);
-            let sx = (camera_x.0 * world_space.0 as i32) + (camera_x.1 * world_space.1 as i32) + (camera_x.2 * world_space.2 as i32);
-            let sy = (camera_y.0 * world_space.0 as i32) + (camera_y.1 * world_space.1 as i32) + (camera_y.2 * world_space.2 as i32);
-
-            let sx = sx * (TILE_WIDTH / 2) as i32;
-            let sy = sy  * (TILE_HALF_WIDTH / 2) as i32;
-            return (
-                (sx + (SCREEN_WIDTH / 2) as i32) as usize,
-                ((sy + (SCREEN_HEIGHT / 2) as i32) - SCREEN_Y_OFFSET as i32) as usize,
-            )
-        },
-        Compass::East => {
-            let camera_x= (-1i32, -1i32, 0i32);
-            let camera_y=    (1i32,  -1i32, -2i32);
-            let sx = (camera_x.0 * world_space.0 as i32) + (camera_x.1 * world_space.1 as i32) + (camera_x.2 * world_space.2 as i32);
-            let sy = (camera_y.0 * world_space.0 as i32) + (camera_y.1 * world_space.1 as i32) + (camera_y.2 * world_space.2 as i32);
-            dot(camera_x, camera_y);
-
-            let sx = sx * (TILE_WIDTH / 2) as i32;
-            let sy = sy  * (TILE_HALF_WIDTH / 2) as i32;
-            return             (
-                (sx + (SCREEN_WIDTH / 2) as i32 + SCREEN_X_OFFSET as i32) as usize,
-                ((sy + (SCREEN_HEIGHT / 2) as i32) ) as usize,
-            )
-        },
-        Compass::West => {
-            let camera_x= (1i32, 1i32, 0i32);
-            let camera_y=    (-1i32,  1i32, -2i32);
-            let sx = (camera_x.0 * world_space.0 as i32) + (camera_x.1 * world_space.1 as i32) + (camera_x.2 * world_space.2 as i32);
-            let sy = (camera_y.0 * world_space.0 as i32) + (camera_y.1 * world_space.1 as i32) + (camera_y.2 * world_space.2 as i32);
-
-            let sx = sx * (TILE_WIDTH / 2) as i32;
-            let sy = sy  * (TILE_HALF_WIDTH / 2) as i32;
-            return             (
-                (sx + (SCREEN_WIDTH / 2) as i32 - SCREEN_X_OFFSET as i32) as usize,
-                ((sy + (SCREEN_HEIGHT / 2) as i32) ) as usize,
-            )
-        },
-        Compass::South => {
-            let camera_x= (-1i32, 1i32, 0i32);
-            let camera_y=    (-1i32,  -1i32, -2i32);
-            let sx = (camera_x.0 * world_space.0 as i32) + (camera_x.1 * world_space.1 as i32) + (camera_x.2 * world_space.2 as i32);
-            let sy = (camera_y.0 * world_space.0 as i32) + (camera_y.1 * world_space.1 as i32) + (camera_y.2 * world_space.2 as i32);
-
-            let sx = sx * (TILE_WIDTH / 2) as i32;
-            let sy = sy  * (TILE_HALF_WIDTH / 2) as i32;
-            return             (
-                (sx + (SCREEN_WIDTH / 2) as i32) as usize,
-                ((sy + (SCREEN_HEIGHT / 2) as i32) + SCREEN_Y_OFFSET as i32) as usize,
-            )
-        }
-    }
-
-         */
-
 }
 
 fn dot(p0: (i32, i32, i32), p1: (i32, i32, i32)) -> i32 {

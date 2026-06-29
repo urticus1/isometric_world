@@ -13,6 +13,8 @@ Mouse to select cube or worker
 - x -> delete the hovered cube
 - n -> night mode
 - left click -> select worker
+- right click -> place cube above hovered cube
+- r -> rotate world by 90 degrees
 
 When a worker is selected (currently no indication of this)
 
@@ -26,3 +28,4 @@ When a worker is selected (currently no indication of this)
 - workers may spawn in crater and be stuck
 - mouse selection has rounding errors which makes it feel slightly off, particularly when selecting cubes many layers
   below the view window top, this can be fixed by scrolling down to a closer layer
+- worker animations direction are wrong in rotations other than default

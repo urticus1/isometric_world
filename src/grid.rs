@@ -80,67 +80,6 @@ impl Grid {
         }
     }
 
-    /**
-    pub fn update_active_water(&mut self) {
-        let length = self.active_water.len();
-        for i in 0..length {
-            let water = self.active_water.pop().unwrap();
-            let below = (water.0, water.1, water.2 - 1);
-            let cube_below = self.get_cube(below);
-            if cube_below.cube_type == EMPTY_CUBE {
-                self.move_cube(water, below);
-                self.active_water.push(below);
-            }
-            else if cube_below.cube_type == WATER_CUBE {
-                let water_below = cube_below.water_level;
-                let diff = 100.0 - water_below;
-                let water_above = self.get_cube_mut(water);
-                if water_above.water_level > diff {
-                    water_above.water_level -= diff;
-                    self.get_cube_mut(below).water_level += diff;
-                    self.active_water.push(water);
-                }
-                else {
-                    self.get_cube_mut(below).water_level += water_above.water_level;
-                    self.delete_cube(water);
-                }
-            }
-            else {
-                let mut water_in_layer = HashSet::new();
-                let mut queue = VecDeque::new();
-                queue.push_back(water);
-                water_in_layer.insert(water);
-
-                let mut volume = 0.0;
-                while !queue.is_empty() {
-                    let current = queue.pop_front().unwrap();
-                    let current_data = self.get_cube(current);
-                    volume += current_data.water_level;
-
-                    for neighbour in find_horizontal_neighbours(current) {
-                        let data = self.get_cube(neighbour);
-                        if water_in_layer.contains(&neighbour) || ! (data.cube_type == WATER_CUBE || data.cube_type == EMPTY_CUBE) {
-                            continue;
-                        }
-                        water_in_layer.insert(neighbour);
-                        queue.push_back(neighbour);
-                    }
-                }
-                volume = volume / water_in_layer.len() as f32;
-                for cube in water_in_layer {
-                    if volume > 1.0 {
-                        self.get_cube_mut(cube).water_level = volume;
-                        self.get_cube_mut(cube).cube_type = WATER_CUBE;
-                    }
-                    else {
-                        self.delete_cube(cube);
-                    }
-                }
-            }
-        }
-    }
-
-   */
 
     pub fn handle_grid_change_event(&mut self, event: &GridChangeEvent) {
         match event {
