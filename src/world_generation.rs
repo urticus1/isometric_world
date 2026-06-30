@@ -5,8 +5,10 @@ use image::{open, RgbaImage};
 use rand::random_range;
 use crate::events::GridChangeEvent;
 use crate::grid::{Cube, Grid};
-use crate::{find_ground_spawn_z, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH, WATER_CUBE};
+use crate::{EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH, WATER_CUBE};
 use crate::agents::Agent;
+use crate::agents::Direction::Px;
+use crate::render::CubeFace::pX;
 use crate::resources::load_animations;
 
 struct PerlinNoise {
@@ -37,7 +39,7 @@ pub fn prepare_grid(events: Sender<GridChangeEvent>) -> Grid {
     let variance_x = 5.0;
     let frequency_y = 0.1;
     let variance_y = 6.0;
-    let sea_level = ground_level - 10;
+    let sea_level = ground_level - 20;
 
 
     for x in 0..GRID_WIDTH {
@@ -73,7 +75,7 @@ pub fn prepare_grid(events: Sender<GridChangeEvent>) -> Grid {
         }
     }
 
-    for i in 0..20 {
+    for _ in 0..20 {
         let epicentre= (random_range(0..GRID_WIDTH), random_range(0..GRID_WIDTH), random_range(0..GRID_HEIGHT));
         let size = random_range(30..100);
         for i in 0..GRID_WIDTH {
@@ -88,14 +90,13 @@ pub fn prepare_grid(events: Sender<GridChangeEvent>) -> Grid {
         }
     }
 
-
     grid
 }
 
 pub fn place_workers(grid: &mut Grid) -> Vec<Agent> {
-    let man_x = GRID_WIDTH - 17;
+    let man_x = GRID_WIDTH - 40;
     let man_y = GRID_WIDTH - 30;
-    let man2_x = GRID_WIDTH - 17;
+    let man2_x = GRID_WIDTH - 35;
     let man2_y = GRID_WIDTH - 31;
 
     let (man_z, man2_z) = {
@@ -112,7 +113,8 @@ pub fn place_workers(grid: &mut Grid) -> Vec<Agent> {
         destination: None,
         tasks: vec![],
         active_task: None,
-        id: 0
+        id: 0,
+        direction: Px
     };
 
     let mut man2 = Agent {
@@ -124,7 +126,8 @@ pub fn place_workers(grid: &mut Grid) -> Vec<Agent> {
         destination: None,
         tasks: vec![],
         active_task: None,
-        id: 1
+        id: 1,
+        direction: Px
     };
 
     grid.spawn_agent(&mut man);
@@ -133,3 +136,11 @@ pub fn place_workers(grid: &mut Grid) -> Vec<Agent> {
     vec![man, man2]
 }
 
+fn find_ground_spawn_z(grid: &Grid, x: usize, y: usize) -> usize {
+    for z in (0..GRID_HEIGHT).rev() {
+        if grid.get_cube((x, y, z)).cube_type != EMPTY_CUBE {
+            return (z + 1).min(GRID_HEIGHT - 1);
+        }
+    }
+    0
+}

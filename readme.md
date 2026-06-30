@@ -28,4 +28,3 @@ When a worker is selected (currently no indication of this)
 - workers may spawn in crater and be stuck
 - mouse selection has rounding errors which makes it feel slightly off, particularly when selecting cubes many layers
   below the view window top, this can be fixed by scrolling down to a closer layer
-- worker animations direction are wrong in rotations other than default

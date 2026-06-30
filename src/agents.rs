@@ -4,7 +4,7 @@ use std::collections::{BinaryHeap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
-use crate::{Sprite, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH};
+use crate::{Compass, Sprite, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH};
 use crate::animation::{Animation, AnimationPool};
 use crate::grid::{find_horizontal_neighbours, Cube, Grid};
 
@@ -75,7 +75,6 @@ fn reconstruct_path(end: Rc<Node>) -> Vec<(usize, usize, usize)> {
     let mut current = Some(end);
 
     while let Some(node) = current {
-        println!("next {:?}", node.position);
         path.push(node.position);
         current = node.parent.clone();
     }
@@ -151,6 +150,12 @@ pub enum AgentEvent {
     }
 }
 
+pub enum Direction {
+    Px,
+    Py,
+    Nx,
+    Ny
+}
 
 pub struct Agent {
     pub name: String,
@@ -162,11 +167,42 @@ pub struct Agent {
     pub tasks: Vec<AgentTask>,
     pub active_task: Option<AgentCoroutine>,
     pub id: usize,
+    pub direction: Direction,
 }
 
 impl Agent {
+
+    pub fn get_current_animation_frame(&self, compass: &Compass) -> &Sprite {
+        match &*self.animation {
+            Animation::CameraFacingAnimation {frames, ..} => &frames[self.animation_state],
+            Animation::CompassAwareAnimation {frames_ne, frames_nw, frames_se, frames_sw, ..} => {
+                match (compass, &self.direction) {
+                    (Compass::North, Direction::Px) => &frames_se[self.animation_state],
+                    (Compass::North, Direction::Py) => &frames_sw[self.animation_state],
+                    (Compass::North, Direction::Nx) => &frames_nw[self.animation_state],
+                    (Compass::North, Direction::Ny) => &frames_ne[self.animation_state],
+
+                    (Compass::East, Direction::Px) => &frames_sw[self.animation_state],
+                    (Compass::East, Direction::Py) => &frames_nw[self.animation_state],
+                    (Compass::East, Direction::Nx) => &frames_ne[self.animation_state],
+                    (Compass::East, Direction::Ny) => &frames_se[self.animation_state],
+
+                    (Compass::South, Direction::Px) => &frames_nw[self.animation_state],
+                    (Compass::South, Direction::Py) => &frames_ne[self.animation_state],
+                    (Compass::South, Direction::Nx) => &frames_se[self.animation_state],
+                    (Compass::South, Direction::Ny) => &frames_sw[self.animation_state],
+
+                    (Compass::West, Direction::Px) => &frames_ne[self.animation_state],
+                    (Compass::West, Direction::Py) => &frames_se[self.animation_state],
+                    (Compass::West, Direction::Nx) => &frames_sw[self.animation_state],
+                    (Compass::West, Direction::Ny) => &frames_nw[self.animation_state],
+                }
+            }
+        }
+    }
+
     pub fn change_animation(&mut self, animation: &str) {
-        if self.animation.name == animation {
+        if self.animation.name().as_str() == animation {
             return;
         }
         self.animation_state = 0;
@@ -176,7 +212,7 @@ impl Agent {
 
     pub fn advance_animation_state(&mut self)  {
         self.animation_state += 1;
-        if self.animation_state >= self.animation.frames.len() {
+        if self.animation_state >= self.animation.length() {
             self.animation_state = 0;
         }
     }

@@ -7,29 +7,22 @@ mod resources;
 mod events;
 mod world_generation;
 
-use std::cell::RefCell;
 use std::cmp::PartialEq;
-use std::collections::HashMap;
 use std::ops::Deref;
-use std::path::Path;
-use std::sync::{mpsc, Arc, LockResult, Mutex, RwLock};
+use std::sync::{mpsc, Arc, Mutex};
 use std::sync::mpsc::Sender;
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
-use image::{open, Frame, RgbaImage};
 use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
-use minifb::Key::{K, R};
-use noise::{NoiseFn, Perlin};
-use rand::{random, random_range};
+use noise::{NoiseFn};
 use crate::agents::{find_path, Agent, AgentCoroutine, AgentEvent, AgentTask};
 use crate::agents::AgentEvent::AgentAddTask;
-use crate::animation::{Animation, AnimationPool};
-use crate::events::{EventQueue, GridChangeEvent};
-use crate::grid::{find_horizontal_neighbours, get_manhattan_distance, is_horizontal_neighbour, Cube, Grid, Light};
+use crate::agents::Direction::{Nx, Ny, Px, Py};
+use crate::grid::{Cube, Grid, Light};
 use crate::input::{InputBuffer, InputState};
-use crate::render::{draw_left_face, draw_right_face, draw_sprite, draw_top_face, light_flood_fill, Face, FaceReal, Sprite};
-use crate::resources::{load_animations, load_cube_sprites};
+use crate::render::{draw_left_face, draw_right_face, draw_sprite, draw_top_face, CubeFace, Sprite};
+use crate::resources::{load_cube_sprites};
 use crate::world_generation::{place_workers, prepare_grid};
 
 const SCREEN_WIDTH: usize = 2000;
@@ -71,16 +64,16 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
                                 let x_dir = next.0 as i32 - agent.position.0 as i32;
                                 let y_dir = next.1 as i32 - agent.position.1 as i32;
                                 if x_dir < 0 {
-                                    agent.change_animation("running_nw");
+                                    agent.direction = Nx;
                                 }
                                 else if x_dir > 0 {
-                                    agent.change_animation("running_se");
+                                    agent.direction = Px;
                                 }
                                 else if y_dir < 0 {
-                                    agent.change_animation("running_ne");
+                                    agent.direction = Ny;
                                 }
                                 else {
-                                    agent.change_animation("running_sw");
+                                    agent.direction = Py;
                                 }
                                 grid.move_cube(agent.position, next);
                                 agent.position = next;
@@ -179,10 +172,6 @@ fn main() {
                 }
             }
             {
-                let mut grid_lock = grid_clone.lock().unwrap();
-                grid_lock.update_active_water();
-            }
-            {
                 //println!("game tick: {}", gate_tick);
                 let mut mut_agents =  agent_clone.lock().unwrap();
                 match game_events_receiver.try_recv() {
@@ -250,6 +239,7 @@ fn main() {
                         },
 
                         AgentTask::Move { .. } => {
+                            agent.change_animation("running");
                             game_tick + 1
                         }
                         AgentTask::FindPath { .. } => {
@@ -286,22 +276,22 @@ fn main() {
 
     window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
 
-    let mut buffer: Vec<u32> = vec![0xFFFFFF; SCREEN_WIDTH * SCREEN_HEIGHT];
-
-
     let mut view_x = GRID_WIDTH - VIEW_WIDTH;
     let mut view_y = GRID_WIDTH - VIEW_WIDTH;
     let mut view_z = GRID_HEIGHT - VIEW_HEIGHT;
+
     let mut selected_cube: Option<WorldPos> = None;
     let mut night_mode = false;
-    let read_only_grid = Arc::clone(&grid);
+
     let mut compass = Compass::North;
     let mut input_buffer = InputBuffer::new();
     let mut selection_state = InputState {
         selected_agent: None
     };
 
+    let read_only_grid = Arc::clone(&grid);
 
+    let read_only_agents = Arc::clone(&agents);
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let scroll_input = window.get_scroll_wheel().map(|scroll| {
             scroll.1
@@ -318,7 +308,7 @@ fn main() {
             }
         }
 
-        let mut buffer = buffer.clone();
+
         if input_buffer.button_pressed(Key::N) {
             night_mode = !night_mode;
         }
@@ -333,6 +323,10 @@ fn main() {
         }
         if  input_buffer.button_pressed_or_held(Key::W) && view_y < GRID_WIDTH - VIEW_WIDTH {
             view_y += 1;
+        }
+
+        if let Some((sx, sy)) = window.get_mouse_pos(MouseMode::Clamp) {
+            selected_cube = select_cube_mouse(&compass, ScreenPos::new(sx as u32, sy as u32), &*grid.lock().unwrap(), (view_x, view_y, view_z));
         }
 
         if let Some(ref sel) = selected_cube {
@@ -354,29 +348,27 @@ fn main() {
             }
 
             if input_buffer.right_mouse_pressed() {
-                let above = (sel.x + view_x, sel.y + view_y, sel.z + view_z + 1);
-                if above.2 < GRID_HEIGHT {
-                    let mut grid_lock = read_only_grid.lock().unwrap();
-                    if !grid_lock.is_occupied(above) {
-                        grid_lock.place_cube(above, Cube::new(STONE_CUBE));
+                if selection_state.selected_agent.is_some() {
+                    selection_state.selected_agent = None;
+                }
+                else {
+                    let above = (sel.x + view_x, sel.y + view_y, sel.z + view_z + 1);
+                    if above.2 < GRID_HEIGHT {
+                        let mut grid_lock = read_only_grid.lock().unwrap();
+                        if !grid_lock.is_occupied(above) {
+                            grid_lock.place_cube(above, Cube::new(STONE_CUBE));
+                        }
                     }
                 }
+
             }
 
             if input_buffer.button_pressed(Key::R) {
                 match &compass {
-                    Compass::North => {
-                        compass = Compass::East;
-                    },
-                    Compass::East => {
-                        compass = Compass::South;
-                    },
-                    Compass::South => {
-                        compass = Compass::West;
-                    },
-                    Compass::West => {
-                        compass = Compass::North;
-                    }
+                    Compass::North => compass = Compass::East,
+                    Compass::East => compass = Compass::South,
+                    Compass::South => compass = Compass::West,
+                    Compass::West => compass = Compass::North
                 }
             }
 
@@ -421,21 +413,19 @@ fn main() {
             }
         }
 
-        if let Some((sx, sy)) = window.get_mouse_pos(MouseMode::Clamp) {
-           selected_cube = select_cube_mouse(&compass, ScreenPos::new(sx as u32, sy as u32), &*grid.lock().unwrap(), (view_x, view_y, view_z));
-        }
-
+        //render
+        let mut buffer = vec![0xFFFFFF; SCREEN_WIDTH * SCREEN_HEIGHT];
         let flip_faces = compass != Compass::North && compass != Compass::South;
 
-        let read_only_agents = Arc::clone(&agents);
+
         for z in 0..VIEW_HEIGHT {
             for mut y in 0..VIEW_WIDTH {
                 if compass == Compass::East || compass == Compass::South {
-                    y = (VIEW_WIDTH- 1) - y;
+                    y = (VIEW_WIDTH - 1) - y;
                 }
                 for mut x in 0..VIEW_WIDTH {
-                    if  compass == Compass::South { //TODO should west be in here?
-                        x = (VIEW_WIDTH- 1) - x;
+                    if  compass == Compass::South || compass == Compass::West {
+                        x = (VIEW_WIDTH - 1) - x;
                     }
                     let cube_index = (x + view_x) + ((y + view_y) * GRID_WIDTH) + (z + view_z) * GRID_WIDTH * GRID_WIDTH;
 
@@ -443,11 +433,10 @@ fn main() {
 
                     if selected_cube.is_some() {
                         if WorldPos::new(x,y,z) == selected_cube.clone().unwrap() {
-                            draw_sprite((cube_screen_x, cube_screen_y), &select_cube, &mut buffer);
+                            draw_sprite((cube_screen_x, cube_screen_y), &select_cube, &mut buffer, (0,0,0));
                             continue;
                         }
                     }
-
 
                     let cube_data = {
                         let grid = read_only_grid.lock().unwrap();
@@ -461,7 +450,10 @@ fn main() {
                     if let Some(agent) = cube_data.agent {
                         let agents_copy = read_only_agents.lock().unwrap();
                         let agent: &Agent = &agents_copy[agent as usize];
-                        draw_sprite((cube_screen_x, cube_screen_y), &agent.animation.frames[agent.animation_state], &mut buffer);
+                        let highlight_colour = selection_state.selected_agent
+                            .filter(|selected_agent| *selected_agent == agent.id as u8)
+                            .map_or((0,0,0), |_| (125, 0, 0));
+                        draw_sprite((cube_screen_x, cube_screen_y), &agent.get_current_animation_frame(&compass), &mut buffer, highlight_colour);
                         continue;
                     }
 
@@ -469,82 +461,77 @@ fn main() {
 
 
                     let (visible_face_left, visible_face_right, terminal_x_layer, terminal_y_layer) = match &compass {
-                        Compass::North => {
-                            (FaceReal::pY, FaceReal::pX, VIEW_WIDTH - 1, VIEW_WIDTH - 1)
-                        },
-                        Compass::East => {
-                            (FaceReal::pX, FaceReal::nY, VIEW_WIDTH - 1,  0)
-                        },
-                        Compass::South => {
-                            (FaceReal::nY, FaceReal::nX,  0,  0)
-                        },
-                        Compass::West => {
-                            (FaceReal::nX, FaceReal::pY,  0, VIEW_WIDTH - 1)
-                        }
+                        Compass::North => (CubeFace::pY, CubeFace::pX, VIEW_WIDTH - 1, VIEW_WIDTH - 1),
+                        Compass::East => (CubeFace::pX, CubeFace::nY, VIEW_WIDTH - 1, 0),
+                        Compass::South =>  (CubeFace::nY, CubeFace::nX, 0, 0),
+                        Compass::West => (CubeFace::nX, CubeFace::pY, 0, VIEW_WIDTH - 1)
                     };
 
-
-                    {
+                    let (blocking_left, blocking_right, blocking_top) = {
                         let grid = read_only_grid.lock().unwrap();
+                        let left = grid.get_blocking_cube(&visible_face_left, cube_index);
+                        let right = grid.get_blocking_cube(&visible_face_right, cube_index);
+                        let top = grid.get_blocking_cube(&CubeFace::Z, cube_index);
+                        (left, right, top)
+                    };
 
-                        if let Some(next_y) = grid.get_blocking_cube(&visible_face_left, cube_index) {
-                            if next_y.is_transparent() { //TODO this depends on orientation
-                                let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
-                                draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
-                            }
-                        }
-                        else {
+                    if let Some(next_y) = blocking_left {
+                        if next_y.is_transparent() {
                             let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
-                            draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                            draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
                         }
-
-
-                        if let Some(next_x) = grid.get_blocking_cube(&visible_face_right, cube_index) {
-                            if next_x.is_transparent() { //TODO this depends on orientation
-                                let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
-                                draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
-                            }
-                        }
-                        else {
-                            let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
-                            draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
-                        }
-
-                        if let Some(next_z) = grid.get_blocking_cube(&FaceReal::Z, cube_index) {
-                            if next_z.is_transparent() { //TODO this depends on orientation
-                                let face = cube_data.cube_z_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
-                                draw_top_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
-                            }
-                            else if z == VIEW_HEIGHT - 1 {
-                                draw_top_face((cube_screen_x, cube_screen_y), &sprites[3], &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
-                            }
-                        }
-                        else {
-                            let face = cube_data.cube_z_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
-                            draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
-                        }
-
-                        if x == terminal_x_layer {
-                            let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
-                            if flip_faces {
-                                draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
-                            }
-                            else {
-                                draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
-                            }
-                        }
-
-                        if y == terminal_y_layer {
-                            let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
-                            if flip_faces {
-                                draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
-                            }
-                            else {
-                                draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
-                            }
-                        }
-
                     }
+                    else {
+                        let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                        draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                    }
+
+
+                    if let Some(next_x) = blocking_right {
+                        if next_x.is_transparent() {
+                            let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                            draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                        }
+                    }
+                    else {
+                        let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                        draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                    }
+
+                    if let Some(next_z) = blocking_top {
+                        if next_z.is_transparent() {
+                            let face = cube_data.cube_z_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                            draw_top_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                        }
+                        else if z == VIEW_HEIGHT - 1 {
+                            draw_top_face((cube_screen_x, cube_screen_y), &sprites[3], &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                        }
+                    }
+                    else {
+                        let face = cube_data.cube_z_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                        draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                    }
+
+                    if x == terminal_x_layer {
+                        let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                        if flip_faces {
+                            draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                        }
+                        else {
+                            draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                        }
+                    }
+
+                    if y == terminal_y_layer {
+                        let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                        if flip_faces {
+                            draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                        }
+                        else {
+                            draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                        }
+                    }
+
                 }
             }
         }
@@ -556,26 +543,7 @@ fn main() {
 }
 
 fn find_sprite<'a>(cube_data: &Cube, sprites: &'a Vec<Sprite>) -> &'a Sprite {
-    if cube_data.cube_type == WATER_CUBE {
-        if cube_data.water_level >= 100.0 {
-            &sprites[cube_data.cube_type as usize]
-        }
-        else if cube_data.water_level > 50.0 {
-            &sprites[cube_data.cube_type as usize + 2]
-        }
-        else if cube_data.water_level > 25.0 {
-            &sprites[cube_data.cube_type as usize + 3]
-        }
-        else if cube_data.water_level > 1.0 {
-            &sprites[cube_data.cube_type as usize + 4]
-        }
-        else {
-            &sprites[cube_data.cube_type as usize + 4]
-        }
-    }
-    else {
-        return &sprites[cube_data.cube_type as usize];
-    }
+    &sprites[cube_data.cube_type as usize]
 }
 
 fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube: (usize, usize, usize), selection_state: &mut InputState) {
@@ -599,14 +567,6 @@ fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube
 }
 
 
-fn find_ground_spawn_z(grid: &Grid, x: usize, y: usize) -> usize {
-    for z in (0..GRID_HEIGHT).rev() {
-        if grid.get_cube((x, y, z)).cube_type != EMPTY_CUBE {
-            return (z + 1).min(GRID_HEIGHT - 1);
-        }
-    }
-    0
-}
 
 #[derive(PartialEq)]
 enum Compass {

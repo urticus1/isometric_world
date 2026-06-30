@@ -101,7 +101,7 @@ pub enum Face {
     TOP
 }
 
-pub enum FaceReal {
+pub enum CubeFace {
     pX,
     pY,
     nX,
@@ -121,7 +121,7 @@ pub fn draw_right_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut
     draw_face(Face::RIGHT, screen_pos, sprite, buffer, light);
 }
 
-pub fn draw_sprite(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>) {
+pub fn draw_sprite(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, highlight: (u8, u8, u8)) {
     if screen_pos.0 > SCREEN_WIDTH || screen_pos.1 > SCREEN_HEIGHT {
         return;
     }
@@ -131,9 +131,19 @@ pub fn draw_sprite(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec
             if value & (0b11111111u8 as u32) << 24 == 0 {
                 continue;
             }
+
+            let r = ((value & RED_MASK) >> 16) as u8;
+            let g = ((value & GREEN_MASK) >> 8) as u8;
+            let b = (value & BLUE_MASK) as u8;
+
+            let r = r.saturating_add(highlight.0) as u32;
+            let g = g.saturating_add(highlight.1) as u32;
+            let b = b.saturating_add(highlight.2) as u32;
+
+            let val = 0u32 | r << 16 | g << 8 | b;
             let pixel = (screen_pos.0 + SCREEN_WIDTH * screen_pos.1) + x + y * SCREEN_WIDTH;
             if (pixel < buffer.len()) {
-                buffer[pixel] = value
+                buffer[pixel] = val
             }
         }
     }

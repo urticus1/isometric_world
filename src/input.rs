@@ -53,7 +53,7 @@ impl InputBuffer {
         }
 
         if left_mouse_down {
-            if self.left_mouse_state == Pressed {
+            if self.left_mouse_state == Pressed || self.left_mouse_state == ButtonState::Held  {
                 self.left_mouse_state = ButtonState::Held;
             }
             else {
@@ -65,7 +65,7 @@ impl InputBuffer {
         }
 
         if right_mouse_down {
-            if self.right_mouse_state == Pressed {
+            if self.right_mouse_state == Pressed || self.right_mouse_state == ButtonState::Held {
                 self.right_mouse_state = ButtonState::Held;
             }
             else {
