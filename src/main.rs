@@ -44,7 +44,7 @@ const STONE_CUBE: u8 = 0;
 const WATER_CUBE: u8 = 6;
 const LANTERN_CUBE: u8 = 7;
 
-const SUN_LIGHT: (u8, u8, u8) = (205, 205, 205);
+const SUN_LIGHT: (u8, u8, u8) = (205, 225, 235);
 
 
 fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
@@ -478,57 +478,57 @@ fn main() {
                     if let Some(next_y) = blocking_left {
                         if next_y.is_transparent() {
                             let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
-                            draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                            draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
                         }
                     }
                     else {
                         let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
-                        draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                        draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
                     }
 
 
                     if let Some(next_x) = blocking_right {
                         if next_x.is_transparent() {
                             let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
-                            draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                            draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
                         }
                     }
                     else {
                         let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
-                        draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                        draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
                     }
 
                     if let Some(next_z) = blocking_top {
                         if next_z.is_transparent() {
                             let face = cube_data.cube_z_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
-                            draw_top_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                            draw_top_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.z_level, cube_light.z_level, cube_light.z_level))
                         }
                         else if z == VIEW_HEIGHT - 1 {
-                            draw_top_face((cube_screen_x, cube_screen_y), &sprites[3], &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                            draw_top_face((cube_screen_x, cube_screen_y), &sprites[3], &mut buffer, (cube_light.z_level, cube_light.z_level, cube_light.z_level))
                         }
                     }
                     else {
                         let face = cube_data.cube_z_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
-                        draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                        draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.z_level, cube_light.z_level, cube_light.z_level))
                     }
 
                     if x == terminal_x_layer {
                         let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
                         if flip_faces {
-                            draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                            draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
                         }
                         else {
-                            draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                            draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
                         }
                     }
 
                     if y == terminal_y_layer {
                         let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
                         if flip_faces {
-                            draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                            draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
                         }
                         else {
-                            draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.y_level, cube_light.z_level))
+                            draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
                         }
                     }
 
