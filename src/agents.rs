@@ -4,7 +4,7 @@ use std::collections::{BinaryHeap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
-use crate::{Compass, Sprite, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH};
+use crate::{Compass, Sprite, GRID_HEIGHT, GRID_WIDTH};
 use crate::animation::{Animation, AnimationPool};
 use crate::grid::{find_horizontal_neighbours, Cube, Grid};
 
@@ -14,9 +14,9 @@ pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid:
     let mut nodes: HashMap<(usize, usize, usize), Rc<Node>> = HashMap::new();
 
     let start = Rc::new(Node {
-        h: 0,
-        f: 0,
-        g: 0,
+        h: 0.0,
+        f: 0.0,
+        g: 0.0,
         parent: None,
         position: start
     });
@@ -31,14 +31,14 @@ pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid:
             if closed.contains_key(&neighbour) {
                 continue;
             }
-            let g = current.g + 1;
+            let g = current.g + 1.0;
             let h = distance(neighbour, end);
             let f = h + g;
             if !nodes.contains_key(&neighbour) {
                 let node = Rc::from(Node {
                     h: distance(neighbour, end),
-                    f: distance(neighbour, end) + current.g + 1,
-                    g: current.g + 1,
+                    f: distance(neighbour, end) + current.g + 1.0,
+                    g: current.g + 1.0,
                     parent: Some(Rc::clone(&current)),
                     position: neighbour
                 });
@@ -50,8 +50,8 @@ pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid:
                 if f < node.f {
                     let node = Rc::from(Node {
                         h: distance(neighbour, end),
-                        f: distance(neighbour, end) + current.g + 1,
-                        g: current.g + 1,
+                        f: distance(neighbour, end) + current.g + 1.0,
+                        g: current.g + 1.0,
                         parent: Some(Rc::clone(&current)),
                         position: neighbour
                     });
@@ -82,26 +82,26 @@ fn reconstruct_path(end: Rc<Node>) -> Vec<(usize, usize, usize)> {
     path
 }
 
-fn distance(start: (usize, usize, usize), end: (usize, usize, usize)) -> u32 {
-    let x = (end.0 as i32 - start.0 as i32 ).pow(2) as u32;
-    let y = (end.1 as i32 - start.1 as i32 ).pow(2) as u32;
-    let z = (end.2 as i32 - start.2 as i32 ).pow(2) as u32;
-    x + y + z
+fn distance(start: (usize, usize, usize), end: (usize, usize, usize)) -> f32 {
+    let x = (end.0 as i32 - start.0 as i32 ).pow(2) as f32;
+    let y = (end.1 as i32 - start.1 as i32 ).pow(2) as f32;
+    let z = (end.2 as i32 - start.2 as i32 ).pow(2) as f32;
+    (x + y + z).sqrt()
 }
 
-#[derive(Eq, PartialEq, Clone)]
 struct Node {
-    h: u32,
-    f: u32,
-    g: u32,
+    h: f32,
+    f: f32,
+    g: f32,
     parent: Option<Rc<Node>>,
     position: (usize, usize, usize)
 }
 
 impl Ord for Node {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.f.cmp(&self.f)
-            .then_with(|| other.h.cmp(&self.h))
+        other.f.total_cmp(&self.f)
+            .then_with(|| other.h.total_cmp(&self.h))
+
     }
 }
 
@@ -110,6 +110,14 @@ impl PartialOrd for Node {
         Some(self.cmp(other))
     }
 }
+
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        self.f == other.f && self.g == other.g && self.parent == other.parent
+    }
+}
+
+impl Eq for Node {}
 
 fn get_neighbours(position: (usize, usize, usize), grid: &Grid) -> Vec<(usize, usize, usize)> {
     let mut neighbours: Vec<(usize, usize, usize)> = Vec::new();
@@ -121,20 +129,20 @@ fn get_neighbours(position: (usize, usize, usize), grid: &Grid) -> Vec<(usize, u
         }
         let next = (next.0 as usize, next.1 as usize, next.2 as usize);
         let next_cube = grid[grid.get_vector_pos(next).unwrap()];
-        if next_cube.cube_type == EMPTY_CUBE && next_cube.agent.is_none() {
+        if next_cube.cube_type.is_none() && next_cube.agent.is_none() {
             if grid[grid.get_vector_pos((next.0, next.1, next.2 - 1)).unwrap()].is_walkable() {
                 neighbours.push(next);
             }
             else if
                 position.2 >= 2
-                && grid[grid.get_vector_pos((next.0, next.1, next.2 - 1)).unwrap()].cube_type == EMPTY_CUBE
+                && grid[grid.get_vector_pos((next.0, next.1, next.2 - 1)).unwrap()].cube_type.is_none()
                 && grid[grid.get_vector_pos((next.0, next.1, next.2 - 1)).unwrap()].agent.is_none()
                 && grid[grid.get_vector_pos((next.0, next.1, next.2 - 2)).unwrap()].is_walkable() {
                     neighbours.push((next.0, next.1, next.2 - 1));
             }
         }
         else if position.2 < GRID_HEIGHT - 1
-            && grid[grid.get_vector_pos((next.0, next.1, next.2 + 1)).unwrap()].cube_type == EMPTY_CUBE
+            && grid[grid.get_vector_pos((next.0, next.1, next.2 + 1)).unwrap()].cube_type.is_none()
             && grid[grid.get_vector_pos((next.0, next.1, next.2 + 1)).unwrap()].agent.is_none()
             && next_cube.is_walkable(){
             neighbours.push((next.0, next.1, next.2 + 1));

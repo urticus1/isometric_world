@@ -22,7 +22,7 @@ use crate::agents::Direction::{Nx, Ny, Px, Py};
 use crate::grid::{Cube, Grid, Light};
 use crate::input::{InputBuffer, InputState};
 use crate::render::{draw_left_face, draw_right_face, draw_sprite, draw_top_face, CubeFace, Sprite};
-use crate::resources::{load_cube_sprites};
+use crate::resources::{load_cube_sprites, CubeType};
 use crate::world_generation::{place_workers, prepare_grid};
 
 const SCREEN_WIDTH: usize = 2000;
@@ -38,11 +38,6 @@ const GRID_WIDTH: usize = 300;
 
 const VIEW_HEIGHT: usize = 20;
 const VIEW_WIDTH: usize = 60;
-
-const EMPTY_CUBE: u8 = 255;
-const STONE_CUBE: u8 = 0;
-const WATER_CUBE: u8 = 6;
-const LANTERN_CUBE: u8 = 7;
 
 const SUN_LIGHT: (u8, u8, u8) = (205, 225, 235);
 
@@ -116,7 +111,7 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
                 if agent.position.2 > 0 {
                     if let Ok(mut grid) = grid.lock() {
                         let index = grid.get_vector_pos(*target).unwrap();
-                        grid[index].cube_type = 4;
+                        grid[index].cube_type = Some(CubeType::Mud);
                     }
                 }
 
@@ -356,7 +351,7 @@ fn main() {
                     if above.2 < GRID_HEIGHT {
                         let mut grid_lock = read_only_grid.lock().unwrap();
                         if !grid_lock.is_occupied(above) {
-                            grid_lock.place_cube(above, Cube::new(STONE_CUBE));
+                            grid_lock.place_cube(above, Cube::new(CubeType::Stone));
                         }
                     }
                 }
@@ -400,7 +395,7 @@ fn main() {
                     let _ = game_events.send(AgentAddTask {
                         task: AgentTask::Place {
                             target: world_pos,
-                            cube: Cube::new(LANTERN_CUBE)
+                            cube: Cube::new(CubeType::Lantern)
                         },
                         agent: agent_id as usize,
                     });
@@ -443,7 +438,7 @@ fn main() {
                         grid[cube_index]
                     };
 
-                    if cube_data.cube_type == EMPTY_CUBE && !cube_data.agent.is_some() {
+                    if cube_data.cube_type.is_none() && !cube_data.agent.is_some() {
                         continue;
                     }
 
@@ -477,30 +472,30 @@ fn main() {
 
                     if let Some(next_y) = blocking_left {
                         if next_y.is_transparent() {
-                            let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                            let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
                             draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
                         }
                     }
                     else {
-                        let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                        let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
                         draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
                     }
 
 
                     if let Some(next_x) = blocking_right {
                         if next_x.is_transparent() {
-                            let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                            let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
                             draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
                         }
                     }
                     else {
-                        let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                        let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
                         draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
                     }
 
                     if let Some(next_z) = blocking_top {
                         if next_z.is_transparent() {
-                            let face = cube_data.cube_z_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                            let face = cube_data.cube_z_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
                             draw_top_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.z_level, cube_light.z_level, cube_light.z_level))
                         }
                         else if z == VIEW_HEIGHT - 1 {
@@ -508,12 +503,12 @@ fn main() {
                         }
                     }
                     else {
-                        let face = cube_data.cube_z_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                        let face = cube_data.cube_z_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
                         draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.z_level, cube_light.z_level, cube_light.z_level))
                     }
 
                     if x == terminal_x_layer {
-                        let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                        let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
                         if flip_faces {
                             draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
                         }
@@ -523,7 +518,7 @@ fn main() {
                     }
 
                     if y == terminal_y_layer {
-                        let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites), |x| { &sprites[x as usize] });
+                        let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
                         if flip_faces {
                             draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
                         }
@@ -542,8 +537,9 @@ fn main() {
     }
 }
 
-fn find_sprite<'a>(cube_data: &Cube, sprites: &'a Vec<Sprite>) -> &'a Sprite {
-    &sprites[cube_data.cube_type as usize]
+fn find_sprite<'a>(cube_data: &Cube, sprites: &'a Vec<Sprite>) -> Option<&'a Sprite> {
+    cube_data.cube_type.map_or(None, |cube| Some(&sprites[cube as usize]))
+
 }
 
 fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube: (usize, usize, usize), selection_state: &mut InputState) {
@@ -568,7 +564,7 @@ fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube
 
 
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 enum Compass {
     North,
     South,
@@ -663,8 +659,7 @@ fn select_cube_mouse(compass: &Compass, screen_space: ScreenPos, grid: &Grid, vi
         match index {
             Ok(_) => {
                 let cube = grid.get_cube((x as usize + view_point.0, y as usize + view_point.1, z as usize + view_point.2));
-                if cube.cube_type != EMPTY_CUBE || cube.agent.is_some() {
-                    println!("{:?}", pos);
+                if cube.cube_type.is_some() || cube.agent.is_some() {
                     return Some(WorldPos::new(x as usize, y as usize, z as usize));
                 }
             },
@@ -677,7 +672,7 @@ fn select_cube_mouse(compass: &Compass, screen_space: ScreenPos, grid: &Grid, vi
     None
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct ScreenPos {
     pub x: u32,
     pub y: u32,

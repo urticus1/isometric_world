@@ -1,10 +1,47 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::animation::{Animation, AnimationPool};
+use crate::animation::{AnimationPool};
 use crate::animation::Animation::{CameraFacingAnimation, CompassAwareAnimation};
 use crate::render::Sprite;
 
+
+macro_rules! cube_types {
+      ($($variant:ident => $path:literal),* $(,)?) => {
+          #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+          #[repr(u8)]
+          pub enum CubeType { $($variant),* }
+
+          impl CubeType {
+              pub const ALL: &'static [CubeType] = &[$(CubeType::$variant),*];
+
+              pub const fn path(self) -> &'static str {
+                  match self { $(CubeType::$variant => $path),* }
+              }
+          }
+
+          pub fn load_cube_sprites() -> Vec<Sprite> {
+              CubeType::ALL.iter().map(|c| Sprite::new(c.path())).collect()
+          }
+      };
+}
+
+cube_types! {
+    Stone        => "resources/24/stone_no_light.png",
+    Mud          => "resources/24/mud_no_light.png",
+    Grass        => "resources/24/grass_no_light.png",
+    Blank        => "resources/24/blank.png",
+    Floor        => "resources/24/floor.png",
+    Man          => "resources/24/man/man_idle.png",
+    Water        => "resources/24/water.png",
+    Lantern      => "resources/24/lantern.png",
+    WaterHalf    => "resources/24/water_half.png",
+    WaterQuarter => "resources/24/water_quarter.png",
+    WaterSmall   => "resources/24/water_small.png",
+}
+
+
 pub fn load_animations() -> AnimationPool {
+
     let man1 = Sprite::new("resources/24/man/animations/ploughing/man_ploughing1.png");
     let man2 = Sprite::new("resources/24/man/animations/ploughing/man_ploughing2.png");
     let man3 = Sprite::new("resources/24/man/animations/ploughing/man_ploughing3.png");
@@ -87,21 +124,4 @@ pub fn load_animations() -> AnimationPool {
             ("idle".to_string(), idle_animation),
         ])
     }
-}
-
-pub fn load_cube_sprites() -> Vec<Sprite> {
-    let stone = Sprite::new("resources/24/stone_no_light.png");
-    let mud = Sprite::new("resources/24/mud_no_light.png");
-    let grass = Sprite::new("resources/24/grass_no_light.png");
-    let blank = Sprite::new("resources/24/blank.png");
-    let floor = Sprite::new("resources/24/floor.png");
-    let man = Sprite::new("resources/24/man/man_idle.png");
-
-    let water = Sprite::new("resources/24/water.png");
-    let lantern = Sprite::new("resources/24/lantern.png");
-    let water_half = Sprite::new("resources/24/water_half.png");
-    let water_quarter = Sprite::new("resources/24/water_quarter.png");
-    let water_small = Sprite::new("resources/24/water_small.png");
-
-    vec![stone, mud, grass, blank, floor, man, water, lantern, water_half, water_quarter, water_small]
 }

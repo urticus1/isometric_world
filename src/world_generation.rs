@@ -1,15 +1,14 @@
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use std::sync::mpsc::Sender;
 use image::{open, RgbaImage};
 use rand::random_range;
 use crate::events::GridChangeEvent;
 use crate::grid::{Cube, Grid};
-use crate::{EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH, WATER_CUBE};
+use crate::{GRID_HEIGHT, GRID_WIDTH};
 use crate::agents::Agent;
 use crate::agents::Direction::Px;
-use crate::render::CubeFace::pX;
-use crate::resources::load_animations;
+use crate::resources::{load_animations, CubeType};
 
 struct PerlinNoise {
     pub pixels: RgbaImage,
@@ -54,21 +53,21 @@ pub fn prepare_grid(events: Sender<GridChangeEvent>) -> Grid {
                 let index = grid.get_vector_pos(coord).unwrap();
                 if z > cut_off {
                     if z > sea_level {
-                        grid[index] = Cube::new(EMPTY_CUBE);
+                        grid[index] = Cube::empty();
                     }
                     else {
-                        grid[index] = Cube::new(WATER_CUBE);
+                        grid[index] = Cube::empty();
                         grid[index].water_level = 100.0;
                     }
                 }
                 else if z == cut_off {
-                    grid[index] = Cube::new(2);
+                    grid[index] = Cube::new(CubeType::Grass);
                 }
                 else if z < cut_off && z > cut_off - 5 {
-                    grid[index] = Cube::new(1);
+                    grid[index] = Cube::new(CubeType::Mud);
                 }
                 else {
-                    grid[index] = Cube::new(0);
+                    grid[index] = Cube::new(CubeType::Stone);
                 }
             }
 
@@ -83,7 +82,7 @@ pub fn prepare_grid(events: Sender<GridChangeEvent>) -> Grid {
                 for k in 0..GRID_HEIGHT {
                     if (i as i32 - epicentre.0 as i32).pow(2) + (j as i32 - epicentre.1 as i32).pow(2) + (k as i32 - epicentre.2 as i32).pow(2) < size {
                         let index = grid.get_vector_pos((i,j,k)).unwrap();
-                        grid[index] = Cube::new(EMPTY_CUBE);
+                        grid[index] = Cube::empty();
                     }
                 }
             }
@@ -138,7 +137,7 @@ pub fn place_workers(grid: &mut Grid) -> Vec<Agent> {
 
 fn find_ground_spawn_z(grid: &Grid, x: usize, y: usize) -> usize {
     for z in (0..GRID_HEIGHT).rev() {
-        if grid.get_cube((x, y, z)).cube_type != EMPTY_CUBE {
+        if grid.get_cube((x, y, z)).cube_type.is_some() {
             return (z + 1).min(GRID_HEIGHT - 1);
         }
     }

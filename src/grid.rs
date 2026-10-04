@@ -5,9 +5,10 @@ use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use minifb::Key::N;
-use crate::{Agent, Compass, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH, LANTERN_CUBE, VIEW_WIDTH, WATER_CUBE};
+use crate::{Agent, GRID_HEIGHT, GRID_WIDTH };
 use crate::events::{EventQueue, GridChangeEvent};
 use crate::render::{light_flood_fill, CubeFace};
+use crate::resources::CubeType;
 
 pub struct Grid {
     pub grid: Vec<Cube>,
@@ -19,84 +20,17 @@ pub struct Grid {
 
 impl Grid {
 
-    pub fn update_active_water(&mut self) {
-        let length = self.active_water.len();
-        for i in 0..length {
-            let water = self.active_water.pop_front().unwrap();
-            let below = (water.0, water.1, water.2 - 1);
-            let cube_below = self.get_cube(below);
-            if cube_below.cube_type == EMPTY_CUBE {
-                self.move_cube(water, below);
-                self.active_water.push_back(below);
-            }
-            else if cube_below.cube_type == WATER_CUBE && cube_below.water_level != 100.0 {
-                let water_below = cube_below.water_level;
-                let diff = 100.0 - water_below;
-                let water_above = self.get_cube_mut(water);
-                if water_above.water_level > diff {
-                    water_above.water_level -= diff;
-                    self.get_cube_mut(below).water_level += diff;
-                    self.active_water.push_back(water);
-                }
-                else {
-                    self.get_cube_mut(below).water_level += water_above.water_level;
-                    self.delete_cube(water);
-                }
-            }
-            else {
-                let mut changed_cubes = vec![];
-
-                let original_water = self.get_cube(water);
-                let mut volume_available = original_water.water_level;
-                for neighbour in find_horizontal_neighbours(water) {
-                    let neighbour_cube = self.get_cube(neighbour);
-                    if !(neighbour_cube.cube_type == WATER_CUBE || neighbour_cube.cube_type == EMPTY_CUBE) {
-                        continue;
-                    }
-                    if neighbour_cube.water_level < original_water.water_level - 0.1 || neighbour_cube.water_level > original_water.water_level + 0.1 {
-                        changed_cubes.push(neighbour);
-                        volume_available += neighbour_cube.water_level;
-                    }
-                }
-                if (changed_cubes.is_empty()) {
-                    return;
-                }
-                let volume = volume_available / changed_cubes.len() as f32;
-
-                if original_water.water_level < volume - 0.1 || original_water.water_level > volume + 0.1 {
-                    changed_cubes.push(water);
-                }
-                for cube in changed_cubes {
-                    if volume > 1.0 {
-                        self.get_cube_mut(cube).water_level = volume;
-                        self.get_cube_mut(cube).cube_type = WATER_CUBE;
-                        self.active_water.push_back(cube);
-                    }
-                    else {
-                        self.delete_cube(cube);
-                    }
-                }
-            }
-        }
-    }
-
-
     pub fn handle_grid_change_event(&mut self, event: &GridChangeEvent) {
         match event {
             GridChangeEvent::Delete(pos) => {
                 let neighbours = find_face_neighbours(*pos);
-                for neighbour in neighbours {
-                    if self.get_cube(neighbour).cube_type == WATER_CUBE {
-                        self.active_water.push_back(neighbour);
-                    }
-                }
             }
         }
     }
 
     pub fn new(width: usize, height: usize, event_queue: Sender<GridChangeEvent>) -> Grid {
         Grid {
-            grid: vec![Cube::new(0); width * width * height],
+            grid: vec![Cube::new(CubeType::Stone); width * width * height],
             width: width,
             height: height,
             events: event_queue,
@@ -171,7 +105,7 @@ impl Grid {
     pub fn delete_cube(&mut self, pos: (usize, usize, usize)) {
         let index = self.get_vector_pos(pos).unwrap();
         let mut cube = self.grid[index];
-        cube.cube_type = EMPTY_CUBE;
+        cube.cube_type = None;
         cube.cube_x_face = None;
         cube.cube_y_face = None;
         cube.cube_z_face = None;
@@ -187,7 +121,7 @@ impl Grid {
     pub fn place_cube(&mut self, pos: (usize, usize, usize), cube: Cube) {
         let index = self.get_vector_pos(pos).unwrap();
         self.grid[index] = cube;
-        if cube.cube_type == LANTERN_CUBE {
+        if cube.cube_type == Some(CubeType::Lantern) {
             light_flood_fill(pos, 10, self);
         }
     }
@@ -208,7 +142,7 @@ impl Grid {
 
     pub fn is_occupied(&self, position: (usize, usize, usize)) -> bool {
         let index = self.get_vector_pos(position).unwrap();
-        self.grid[index].agent.is_some() || self.grid[index].cube_type != EMPTY_CUBE
+        self.grid[index].agent.is_some() || self.grid[index].cube_type.is_some()
     }
 }
 
@@ -262,7 +196,7 @@ impl IndexMut<usize> for Grid {
 
 #[derive(Copy, Clone)]
 pub struct Cube {
-    pub cube_type: u8,
+    pub cube_type: Option<CubeType>,
     pub cube_x_face: Option<u8>,
     pub cube_y_face: Option<u8>,
     pub cube_z_face: Option<u8>,
@@ -334,9 +268,21 @@ impl ops::Add<Light> for Light {
 }
 
 impl Cube {
-    pub fn new(cube_type: u8) -> Self {
+    pub fn new(cube_type: CubeType) -> Self {
         Cube {
-            cube_type: cube_type,
+            cube_type: Some(cube_type),
+            cube_y_face: None,
+            cube_x_face: None,
+            cube_z_face: None,
+            agent: None,
+            light_level: Light::min_level(),
+            water_level: 0.0
+        }
+    }
+
+    pub fn empty() -> Self {
+        Cube {
+            cube_type: None,
             cube_y_face: None,
             cube_x_face: None,
             cube_z_face: None,
@@ -347,16 +293,16 @@ impl Cube {
     }
 
     pub fn is_walkable(&self) -> bool {
-        self.cube_type != WATER_CUBE && self.cube_type != EMPTY_CUBE && self.agent.is_none()
+        self.cube_type != Some(CubeType::Water) && self.cube_type.is_some() && self.agent.is_none()
     }
 
     pub fn is_transparent(&self) -> bool {
-        self.cube_type == EMPTY_CUBE || self.agent.is_some() || self.cube_type == WATER_CUBE ||self.cube_type == LANTERN_CUBE
+        self.cube_type.is_none() || self.agent.is_some() || self.cube_type == Some(CubeType::Water) ||self.cube_type == Some(CubeType::Lantern)
     }
 
     pub fn with_agent(agent: u8) -> Cube {
         Cube {
-            cube_type: EMPTY_CUBE,
+            cube_type: None,
             cube_y_face: None,
             cube_x_face: None,
             cube_z_face: None,
