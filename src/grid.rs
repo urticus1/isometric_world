@@ -5,7 +5,7 @@ use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use minifb::Key::N;
-use crate::{Agent, GRID_HEIGHT, GRID_WIDTH };
+use crate::{Agent, WorldPos, GRID_HEIGHT, GRID_WIDTH};
 use crate::events::{EventQueue, GridChangeEvent};
 use crate::render::{light_flood_fill, CubeFace};
 use crate::resources::CubeType;
@@ -15,7 +15,7 @@ pub struct Grid {
     width: usize,
     height: usize,
     events: Sender<GridChangeEvent>,
-    active_water: VecDeque<(usize, usize, usize)>,
+    active_water: VecDeque<WorldPos>,
 }
 
 impl Grid {
@@ -83,15 +83,15 @@ impl Grid {
         Some(self.grid[i + self.width * self.width])
     }
 
-    pub fn get_vector_pos(&self, world_space: (usize, usize, usize)) -> Result<usize, String> {
-        let index = world_space.0 + world_space.1 * self.width + world_space.2 * self.width * self.width;
+    pub fn get_vector_pos(&self, world_space: WorldPos) -> Result<usize, String> {
+        let index = world_space.x + world_space.y * self.width + world_space.z * self.width * self.width;
         if index >= self.grid.len() {
             return Err(format!("Index out of bounds: {}", index));
         };
         Ok(index)
     }
 
-    pub fn move_cube(&mut self, from: (usize, usize, usize), to: (usize, usize, usize)) {
+    pub fn move_cube(&mut self, from: WorldPos, to: WorldPos) {
         if from == to {
             return;
         }
@@ -102,7 +102,7 @@ impl Grid {
         self.delete_cube(from);
     }
 
-    pub fn delete_cube(&mut self, pos: (usize, usize, usize)) {
+    pub fn delete_cube(&mut self, pos: WorldPos) {
         let index = self.get_vector_pos(pos).unwrap();
         let mut cube = self.grid[index];
         cube.cube_type = None;
@@ -118,7 +118,7 @@ impl Grid {
 
     }
 
-    pub fn place_cube(&mut self, pos: (usize, usize, usize), cube: Cube) {
+    pub fn place_cube(&mut self, pos: WorldPos, cube: Cube) {
         let index = self.get_vector_pos(pos).unwrap();
         self.grid[index] = cube;
         if cube.cube_type == Some(CubeType::Lantern) {
@@ -131,53 +131,53 @@ impl Grid {
         self.grid[index] = Cube::with_agent(agent.id as u8);
     }
 
-    pub fn get_cube(&self, pos: (usize, usize, usize)) -> &Cube {
+    pub fn get_cube(&self, pos: WorldPos) -> &Cube {
         &self.grid[self.get_vector_pos(pos).unwrap()]
     }
 
-    pub fn get_cube_mut(&mut self, pos: (usize, usize, usize)) -> &mut Cube {
+    pub fn get_cube_mut(&mut self, pos: WorldPos) -> &mut Cube {
         let index = self.get_vector_pos(pos).unwrap();
         &mut self.grid[index]
     }
 
-    pub fn is_occupied(&self, position: (usize, usize, usize)) -> bool {
+    pub fn is_occupied(&self, position: WorldPos) -> bool {
         let index = self.get_vector_pos(position).unwrap();
         self.grid[index].agent.is_some() || self.grid[index].cube_type.is_some()
     }
 }
 
-pub fn find_horizontal_neighbours(start: (usize, usize, usize)) -> Vec<(usize, usize, usize)> {
+pub fn find_horizontal_neighbours(start: WorldPos) -> Vec<WorldPos> {
     let mut result = Vec::new();
     for dir in [(-1 as isize, 0 as isize), (1, 0), (0, -1), (0, 1)].iter() {
-        let neighbour = (start.0 as isize + dir.0, start.1 as isize + dir.1, start.2);
+        let neighbour = (start.x as isize + dir.0, start.y as isize + dir.1, start.z);
         if neighbour.0 < 0 || neighbour.0 > (GRID_WIDTH - 1) as isize || neighbour.1 < 0 || neighbour.1 > (GRID_WIDTH - 1) as isize {
             continue;
         }
-        let neighbour = (neighbour.0 as usize, neighbour.1 as usize, neighbour.2 as usize);
+        let neighbour = WorldPos::new(neighbour.0 as usize, neighbour.1 as usize, neighbour.2 as usize);
         result.push(neighbour);
     }
     result
 }
 
-pub fn find_face_neighbours(start: (usize, usize, usize)) -> Vec<(usize, usize, usize)> {
+pub fn find_face_neighbours(start: WorldPos) -> Vec<WorldPos> {
     let mut result = Vec::new();
     for dir in [(-1 as isize, 0 as isize, 0 as isize), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0,0,1)].iter() {
-        let neighbour = (start.0 as isize + dir.0, start.1 as isize + dir.1, start.2 as isize + dir.2);
+        let neighbour = (start.x as isize + dir.0, start.y as isize + dir.1, start.z as isize + dir.2);
         if neighbour.0 < 0 || neighbour.0 > (GRID_WIDTH - 1) as isize || neighbour.1 < 0 || neighbour.1 > (GRID_WIDTH - 1) as isize || neighbour.2 < 0 || neighbour.2 > (GRID_HEIGHT - 1) as isize {
             continue;
         }
-        let neighbour = (neighbour.0 as usize, neighbour.1 as usize, neighbour.2 as usize);
+        let neighbour = WorldPos::new(neighbour.0 as usize, neighbour.1 as usize, neighbour.2 as usize);
         result.push(neighbour);
     }
     result
 }
 
-pub fn get_manhattan_distance(start: (usize, usize, usize), end: (usize, usize, usize)) -> usize {
-    (end.0 - start.0) + (end.1 - start.1) + (end.2 - start.2)
+pub fn get_manhattan_distance(start: WorldPos, end: WorldPos) -> usize {
+    (end.x - start.x) + (end.y - start.y) + (end.z - start.z)
 }
 
-pub fn is_horizontal_neighbour(start: (usize, usize, usize), end: (usize, usize, usize)) -> bool {
-    start.2 == end.2 && (end.0 as isize - start.0 as isize).abs() <= 1 && (end.1 as isize - start.1 as isize).abs() <= 1
+pub fn is_horizontal_neighbour(start: WorldPos, end: WorldPos) -> bool {
+    start.z == end.z && (end.x as isize - start.x as isize).abs() <= 1 && (end.y as isize - start.y as isize).abs() <= 1
 }
 
 impl Index<usize> for Grid {

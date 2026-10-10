@@ -56,8 +56,8 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
                     match grid_lock {
                         Ok(mut grid) => {
                             if !grid.is_occupied(next) {
-                                let x_dir = next.0 as i32 - agent.position.0 as i32;
-                                let y_dir = next.1 as i32 - agent.position.1 as i32;
+                                let x_dir = next.x as i32 - agent.position.x as i32;
+                                let y_dir = next.y as i32 - agent.position.y as i32;
                                 if x_dir < 0 {
                                     agent.direction = Nx;
                                 }
@@ -108,7 +108,7 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
 
             }
             AgentTask::Plough { target } => {
-                if agent.position.2 > 0 {
+                if agent.position.z > 0 {
                     if let Ok(mut grid) = grid.lock() {
                         let index = grid.get_vector_pos(*target).unwrap();
                         grid[index].cube_type = Some(CubeType::Mud);
@@ -118,7 +118,7 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
                 completed = true;
             }
             AgentTask::Dig { target } => {
-                if agent.position.2 > 0 {
+                if agent.position.z > 0 {
                     if let Ok(mut grid) = grid.lock() {
                         grid.delete_cube(*target);
                     }
@@ -321,23 +321,23 @@ fn main() {
         }
 
         if let Some((sx, sy)) = window.get_mouse_pos(MouseMode::Clamp) {
-            selected_cube = select_cube_mouse(&compass, ScreenPos::new(sx as u32, sy as u32), &*grid.lock().unwrap(), (view_x, view_y, view_z));
+            selected_cube = select_cube_mouse(compass, ScreenPos::new(sx as u32, sy as u32), &*grid.lock().unwrap(), WorldPos::new(view_x, view_y, view_z));
         }
 
         if let Some(ref sel) = selected_cube {
             if input_buffer.button_pressed(Key::Space) || input_buffer.left_mouse_pressed() {
                 {
                     let grid_lock = read_only_grid.lock().unwrap();
-                    let cube_data = grid_lock.get_cube((sel.x + view_x, sel.y + view_y, sel.z + view_z));
-                    handle_selection(cube_data, &game_events, (sel.x + view_x, sel.y + view_y, sel.z + view_z), &mut selection_state);
+                    let cube_data = grid_lock.get_cube(WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z));
+                    handle_selection(cube_data, &game_events, WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z), &mut selection_state);
                 }
             }
 
             if input_buffer.button_pressed(Key::X) {
                 {
                     let mut grid_lock = read_only_grid.lock().unwrap();
-                    if let None = grid_lock.get_cube((sel.x + view_x, sel.y + view_y, sel.z + view_z)).agent {
-                        grid_lock.delete_cube((sel.x + view_x, sel.y + view_y, sel.z + view_z));
+                    if let None = grid_lock.get_cube(WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z)).agent {
+                        grid_lock.delete_cube(WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z));
                     }
                 }
             }
@@ -347,8 +347,8 @@ fn main() {
                     selection_state.selected_agent = None;
                 }
                 else {
-                    let above = (sel.x + view_x, sel.y + view_y, sel.z + view_z + 1);
-                    if above.2 < GRID_HEIGHT {
+                    let above = WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z + 1);
+                    if above.z < GRID_HEIGHT {
                         let mut grid_lock = read_only_grid.lock().unwrap();
                         if !grid_lock.is_occupied(above) {
                             grid_lock.place_cube(above, Cube::new(CubeType::Stone));
@@ -359,7 +359,7 @@ fn main() {
             }
 
             if input_buffer.button_pressed(Key::R) {
-                match &compass {
+                match compass {
                     Compass::North => compass = Compass::East,
                     Compass::East => compass = Compass::South,
                     Compass::South => compass = Compass::West,
@@ -368,7 +368,7 @@ fn main() {
             }
 
             if input_buffer.button_pressed(Key::P) {
-                let world_pos = (sel.x + view_x, sel.y + view_y, sel.z + view_z);
+                let world_pos = WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z);
                 if let Some(agent_id) = selection_state.selected_agent {
                     let _ = game_events.send(AgentAddTask {
                         task: AgentTask::Plough {
@@ -379,7 +379,7 @@ fn main() {
                 }
             }
             if input_buffer.button_pressed(Key::K) {
-                let world_pos = (sel.x + view_x, sel.y + view_y, sel.z + view_z);
+                let world_pos = WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z);
                 if let Some(agent_id) = selection_state.selected_agent {
                     let _ = game_events.send(AgentAddTask {
                         task: AgentTask::Dig {
@@ -390,7 +390,7 @@ fn main() {
                 }
             }
             if input_buffer.button_pressed(Key::L) {
-                let world_pos = (sel.x + view_x, sel.y + view_y, sel.z + 1 + view_z);
+                let world_pos = WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + 1 + view_z);
                 if let Some(agent_id) = selection_state.selected_agent {
                     let _ = game_events.send(AgentAddTask {
                         task: AgentTask::Place {
@@ -424,7 +424,7 @@ fn main() {
                     }
                     let cube_index = (x + view_x) + ((y + view_y) * GRID_WIDTH) + (z + view_z) * GRID_WIDTH * GRID_WIDTH;
 
-                    let (cube_screen_x, cube_screen_y) = get_screen_coord(&compass, (x,y,z));
+                    let (cube_screen_x, cube_screen_y) = get_screen_coord(compass, WorldPos::new(x,y,z));
 
                     if selected_cube.is_some() {
                         if WorldPos::new(x,y,z) == selected_cube.clone().unwrap() {
@@ -448,14 +448,14 @@ fn main() {
                         let highlight_colour = selection_state.selected_agent
                             .filter(|selected_agent| *selected_agent == agent.id as u8)
                             .map_or((0,0,0), |_| (125, 0, 0));
-                        draw_sprite((cube_screen_x, cube_screen_y), &agent.get_current_animation_frame(&compass), &mut buffer, highlight_colour);
+                        draw_sprite((cube_screen_x, cube_screen_y), &agent.get_current_animation_frame(compass), &mut buffer, highlight_colour);
                         continue;
                     }
 
                     let cube_light = if night_mode { cube_data.light_level } else { Light::max_level() };
 
 
-                    let (visible_face_left, visible_face_right, terminal_x_layer, terminal_y_layer) = match &compass {
+                    let (visible_face_left, visible_face_right, terminal_x_layer, terminal_y_layer) = match compass {
                         Compass::North => (CubeFace::pY, CubeFace::pX, VIEW_WIDTH - 1, VIEW_WIDTH - 1),
                         Compass::East => (CubeFace::pX, CubeFace::nY, VIEW_WIDTH - 1, 0),
                         Compass::South =>  (CubeFace::nY, CubeFace::nX, 0, 0),
@@ -542,7 +542,7 @@ fn find_sprite<'a>(cube_data: &Cube, sprites: &'a Vec<Sprite>) -> Option<&'a Spr
 
 }
 
-fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube: (usize, usize, usize), selection_state: &mut InputState) {
+fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube: WorldPos, selection_state: &mut InputState) {
     if let Some(agent) = cube.agent {
         selection_state.selected_agent = Some(agent);
         return;
@@ -551,7 +551,7 @@ fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube
         Some(agent) => {
             game_events.send(AgentAddTask {
                 task: AgentTask::FindPath {
-                    destination: (selected_cube.0, selected_cube.1, selected_cube.2 + 1),
+                    destination: WorldPos::new(selected_cube.x, selected_cube.y, selected_cube.z + 1),
                 },
                 agent: agent as usize,
             });
@@ -574,8 +574,8 @@ enum Compass {
 
 //this is the transposed version M^T * worldPos -> Camera Space
 //then project onto camera xy plane
-fn get_screen_coord(compass: &Compass, world_space: (usize, usize, usize)) -> (usize, usize) {
-    let world_space = (world_space.0 as i32, world_space.1 as i32, world_space.2 as i32);
+fn get_screen_coord(compass: Compass, world_space: WorldPos) -> (usize, usize) {
+    let world_space = (world_space.x as i32, world_space.y as i32, world_space.z as i32);
 
     let (camera_x_dir, camera_y_dir, x_offset, y_offset) = match compass {
         Compass::North => ((1i32, -1i32, 0i32), (1i32,  1i32, -2i32), 0, -1i32 * SCREEN_Y_OFFSET as i32),
@@ -600,7 +600,7 @@ fn dot(p0: (i32, i32, i32), p1: (i32, i32, i32)) -> i32 {
 
 
 //even though this returns a 'world pos' it is relative to the view window
-fn select_cube_mouse(compass: &Compass, screen_space: ScreenPos, grid: &Grid, view_point: (usize, usize, usize)) -> Option<WorldPos> {
+fn select_cube_mouse(compass: Compass, screen_space: ScreenPos, grid: &Grid, view_point: WorldPos) -> Option<WorldPos> {
     let (sx, sy) = match compass {
         Compass::North => (
             screen_space.x as f32 - SCREEN_WIDTH as f32 / 2.0,
@@ -655,10 +655,10 @@ fn select_cube_mouse(compass: &Compass, screen_space: ScreenPos, grid: &Grid, vi
 
         let pos = (x as usize, y as usize, z as usize);
 
-        let index = grid.get_vector_pos((x as usize + view_point.0, y as usize + view_point.1, z as usize + view_point.2));
+        let index = grid.get_vector_pos(WorldPos::new(x as usize + view_point.x, y as usize + view_point.y, z as usize + view_point.z));
         match index {
             Ok(_) => {
-                let cube = grid.get_cube((x as usize + view_point.0, y as usize + view_point.1, z as usize + view_point.2));
+                let cube = grid.get_cube(WorldPos::new(x as usize + view_point.x, y as usize + view_point.y, z as usize + view_point.z));
                 if cube.cube_type.is_some() || cube.agent.is_some() {
                     return Some(WorldPos::new(x as usize, y as usize, z as usize));
                 }
@@ -684,8 +684,7 @@ impl ScreenPos {
     }
 }
 
-
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 struct WorldPos {
     pub x: usize,
     pub y: usize,
@@ -696,10 +695,47 @@ impl WorldPos {
     fn new(x: usize, y: usize, z: usize) -> WorldPos {
         WorldPos { x, y, z }
     }
-}
 
-impl PartialEq for WorldPos {
-    fn eq(&self, other: &WorldPos) -> bool {
-        self.x == other.x && self.y == other.y && self.z == other.z
+    fn above(&self) -> Option<WorldPos> {
+        if self.z < GRID_HEIGHT - 1 {
+            return Some(WorldPos::new(self.x, self.y, self.z + 1));
+        }
+        None
+    }
+
+    fn below(&self) -> Option<WorldPos> {
+        if self.z > 0 {
+            return Some(WorldPos::new(self.x, self.y, self.z - 1));
+        }
+        None
+    }
+
+    fn next_x(&self) -> Option<WorldPos> {
+        if self.x < GRID_WIDTH - 1 {
+            return Some(WorldPos::new(self.x + 1, self.y, self.z));
+        }
+        None
+    }
+
+    fn prev_x(&self) -> Option<WorldPos> {
+        if self.x > 0 {
+            return Some(WorldPos::new(self.x - 1, self.y, self.z));
+        }
+        None
+    }
+
+    fn next_y(&self) -> Option<WorldPos> {
+        if self.y < GRID_WIDTH - 1 {
+            return Some(WorldPos::new(self.x, self.y + 1, self.z));
+        }
+        None
+    }
+
+    fn prev_y(&self) -> Option<WorldPos> {
+        if self.y > 0 {
+            return Some(WorldPos::new(self.x, self.y - 1, self.z));
+        }
+        None
     }
 }
+

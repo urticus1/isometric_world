@@ -5,7 +5,7 @@ use image::{open, RgbaImage};
 use rand::random_range;
 use crate::events::GridChangeEvent;
 use crate::grid::{Cube, Grid};
-use crate::{GRID_HEIGHT, GRID_WIDTH};
+use crate::{WorldPos, GRID_HEIGHT, GRID_WIDTH};
 use crate::agents::Agent;
 use crate::agents::Direction::Px;
 use crate::resources::{load_animations, CubeType};
@@ -45,11 +45,9 @@ pub fn prepare_grid(events: Sender<GridChangeEvent>) -> Grid {
         for y in 0..GRID_WIDTH {
             for z in 0..GRID_HEIGHT {
                 let val = perlin.get_noise(x, y);
-                let cut_off= ground_level as f32 + val; // = ground_level as f32
-                //+ (x as f32 * frequency_x).sin() * variance_x + (x as f32 * frequency_x * 4.0).sin() * variance_x / 8.0
-                //+ (y as f32 * frequency_y).sin() * variance_y+ (y as f32 * frequency_y * 4.0).sin() * variance_y / 8.0;
+                let cut_off= ground_level as f32 + val;
                 let cut_off = cut_off as usize;
-                let coord = (x,y,z);
+                let coord = WorldPos::new(x,y,z);
                 let index = grid.get_vector_pos(coord).unwrap();
                 if z > cut_off {
                     if z > sea_level {
@@ -81,7 +79,7 @@ pub fn prepare_grid(events: Sender<GridChangeEvent>) -> Grid {
             for j in 0..GRID_WIDTH {
                 for k in 0..GRID_HEIGHT {
                     if (i as i32 - epicentre.0 as i32).pow(2) + (j as i32 - epicentre.1 as i32).pow(2) + (k as i32 - epicentre.2 as i32).pow(2) < size {
-                        let index = grid.get_vector_pos((i,j,k)).unwrap();
+                        let index = grid.get_vector_pos(WorldPos::new(i,j,k)).unwrap();
                         grid[index] = Cube::empty();
                     }
                 }
@@ -105,7 +103,7 @@ pub fn place_workers(grid: &mut Grid) -> Vec<Agent> {
     let worker_animations = Arc::new(load_animations());
     let mut man = Agent {
         animation: worker_animations.animations["idle"].clone(),
-        position: (man_x, man_y, man_z),
+        position: WorldPos::new(man_x, man_y, man_z),
         animation_pool: Arc::clone(&worker_animations),
         name: "man".to_string(),
         animation_state: 0,
@@ -118,7 +116,7 @@ pub fn place_workers(grid: &mut Grid) -> Vec<Agent> {
 
     let mut man2 = Agent {
         animation: worker_animations.animations["idle"].clone(),
-        position: (man2_x, man2_y, man2_z),
+        position: WorldPos::new(man2_x, man2_y, man2_z),
         animation_pool: Arc::clone(&worker_animations),
         name: "man2".to_string(),
         animation_state: 0,
@@ -137,7 +135,7 @@ pub fn place_workers(grid: &mut Grid) -> Vec<Agent> {
 
 fn find_ground_spawn_z(grid: &Grid, x: usize, y: usize) -> usize {
     for z in (0..GRID_HEIGHT).rev() {
-        if grid.get_cube((x, y, z)).cube_type.is_some() {
+        if grid.get_cube(WorldPos::new(x, y, z)).cube_type.is_some() {
             return (z + 1).min(GRID_HEIGHT - 1);
         }
     }

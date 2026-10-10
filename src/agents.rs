@@ -4,14 +4,14 @@ use std::collections::{BinaryHeap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
-use crate::{Compass, Sprite, GRID_HEIGHT, GRID_WIDTH};
+use crate::{Compass, Sprite, WorldPos, GRID_HEIGHT, GRID_WIDTH};
 use crate::animation::{Animation, AnimationPool};
 use crate::grid::{find_horizontal_neighbours, Cube, Grid};
 
-pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid: &Grid) -> Option<Vec<(usize, usize, usize)>> {
+pub fn find_path(start: WorldPos, end: WorldPos, grid: &Grid) -> Option<Vec<WorldPos>> {
     println!("{:?} -> {:?}", start, end);
-    let mut closed: HashMap<(usize, usize, usize), Rc<Node>> = HashMap::new();
-    let mut nodes: HashMap<(usize, usize, usize), Rc<Node>> = HashMap::new();
+    let mut closed: HashMap<WorldPos, Rc<Node>> = HashMap::new();
+    let mut nodes: HashMap<WorldPos, Rc<Node>> = HashMap::new();
 
     let start = Rc::new(Node {
         h: 0.0,
@@ -27,7 +27,7 @@ pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid:
     while !open.is_empty() {
         let current = open.pop().unwrap();
         //path.push(current.position);
-        for neighbour in get_neighbours(current.position, grid) {
+        for neighbour in get_walkable_neighbours(current.position, grid) {
             if closed.contains_key(&neighbour) {
                 continue;
             }
@@ -70,7 +70,7 @@ pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid:
     None
 }
 
-fn reconstruct_path(end: Rc<Node>) -> Vec<(usize, usize, usize)> {
+fn reconstruct_path(end: Rc<Node>) -> Vec<WorldPos> {
     let mut path = Vec::new();
     let mut current = Some(end);
 
@@ -82,10 +82,10 @@ fn reconstruct_path(end: Rc<Node>) -> Vec<(usize, usize, usize)> {
     path
 }
 
-fn distance(start: (usize, usize, usize), end: (usize, usize, usize)) -> f32 {
-    let x = (end.0 as i32 - start.0 as i32 ).pow(2) as f32;
-    let y = (end.1 as i32 - start.1 as i32 ).pow(2) as f32;
-    let z = (end.2 as i32 - start.2 as i32 ).pow(2) as f32;
+fn distance(start: WorldPos, end: WorldPos) -> f32 {
+    let x = (end.x as i32 - start.x as i32 ).pow(2) as f32;
+    let y = (end.y as i32 - start.y as i32 ).pow(2) as f32;
+    let z = (end.z as i32 - start.z as i32 ).pow(2) as f32;
     (x + y + z).sqrt()
 }
 
@@ -94,7 +94,7 @@ struct Node {
     f: f32,
     g: f32,
     parent: Option<Rc<Node>>,
-    position: (usize, usize, usize)
+    position: WorldPos
 }
 
 impl Ord for Node {
@@ -119,36 +119,42 @@ impl PartialEq for Node {
 
 impl Eq for Node {}
 
-fn get_neighbours(position: (usize, usize, usize), grid: &Grid) -> Vec<(usize, usize, usize)> {
-    let mut neighbours: Vec<(usize, usize, usize)> = Vec::new();
+fn get_walkable_neighbours(position: WorldPos, grid: &Grid) -> Vec<WorldPos> {
+    [position.next_x(), position.prev_x(), position.next_y(), position.prev_y()]
+        .into_iter()
+        .flatten()
+        .map(|pos| (pos, grid[grid.get_vector_pos(pos).unwrap()]))
+        .filter(|(pos, cube)| cube.agent.is_none())
+        .flat_map(|(pos, cube)| {
+            match cube.cube_type {
+                Some(_) => {
+                    if let Some(above) = pos.above() {
+                        let cube_above = grid[grid.get_vector_pos(above).unwrap()];
+                        if cube.is_walkable() && cube_above.cube_type.is_none() && cube_above.agent.is_none() {
+                            return Some(above);
+                        }
+                    }
 
-    for dir in [(-1 as i32, 0 as i32), (1, 0), (0, -1), (0, 1)].iter() {
-        let next = (position.0 as i32 + dir.0, position.1 as i32 + dir.1, position.2);
-        if next.0 < 0 || next.0 > GRID_WIDTH as i32 - 1 || next.1 < 0 || next.1 > GRID_WIDTH as i32 - 1 {
-            continue;
-        }
-        let next = (next.0 as usize, next.1 as usize, next.2 as usize);
-        let next_cube = grid[grid.get_vector_pos(next).unwrap()];
-        if next_cube.cube_type.is_none() && next_cube.agent.is_none() {
-            if grid[grid.get_vector_pos((next.0, next.1, next.2 - 1)).unwrap()].is_walkable() {
-                neighbours.push(next);
+                },
+                None => {
+                    let below = pos.below();
+                    if let Some(below) = below {
+                        let cube_below = grid[grid.get_vector_pos(below).unwrap()];
+                        if cube_below.is_walkable() {
+                            return Some(pos);
+                        }
+                        else if let Some(below_below) = below.below() {
+                            let cube_below_below = grid[grid.get_vector_pos(below_below).unwrap()];
+                            if cube_below_below.is_walkable() && cube_below.agent.is_none() {
+                                return Some(below);
+                            }
+                        }
+                    }
+                }
             }
-            else if
-                position.2 >= 2
-                && grid[grid.get_vector_pos((next.0, next.1, next.2 - 1)).unwrap()].cube_type.is_none()
-                && grid[grid.get_vector_pos((next.0, next.1, next.2 - 1)).unwrap()].agent.is_none()
-                && grid[grid.get_vector_pos((next.0, next.1, next.2 - 2)).unwrap()].is_walkable() {
-                    neighbours.push((next.0, next.1, next.2 - 1));
-            }
-        }
-        else if position.2 < GRID_HEIGHT - 1
-            && grid[grid.get_vector_pos((next.0, next.1, next.2 + 1)).unwrap()].cube_type.is_none()
-            && grid[grid.get_vector_pos((next.0, next.1, next.2 + 1)).unwrap()].agent.is_none()
-            && next_cube.is_walkable(){
-            neighbours.push((next.0, next.1, next.2 + 1));
-        }
-    }
-    neighbours
+            None
+        })
+        .collect()
 }
 
 pub enum AgentEvent {
@@ -170,8 +176,8 @@ pub struct Agent {
     pub animation: Arc<Animation>,
     pub animation_state: usize,
     pub animation_pool: Arc<AnimationPool>,
-    pub position: (usize, usize, usize),
-    pub destination: Option<(usize, usize, usize)>,
+    pub position: WorldPos,
+    pub destination: Option<WorldPos>,
     pub tasks: Vec<AgentTask>,
     pub active_task: Option<AgentCoroutine>,
     pub id: usize,
@@ -180,7 +186,7 @@ pub struct Agent {
 
 impl Agent {
 
-    pub fn get_current_animation_frame(&self, compass: &Compass) -> &Sprite {
+    pub fn get_current_animation_frame(&self, compass: Compass) -> &Sprite {
         match &*self.animation {
             Animation::CameraFacingAnimation {frames, ..} => &frames[self.animation_state],
             Animation::CompassAwareAnimation {frames_ne, frames_nw, frames_se, frames_sw, ..} => {
@@ -235,20 +241,20 @@ pub struct AgentCoroutine {
 #[derive(Clone)]
 pub enum AgentTask {
     Move {
-        path: Vec<(usize, usize, usize)>,
-        destination: (usize, usize, usize),
+        path: Vec<WorldPos>,
+        destination: WorldPos,
     },
     FindPath {
-        destination: (usize, usize, usize),
+        destination: WorldPos,
     },
     Plough {
-        target: (usize, usize, usize)
+        target: WorldPos
     },
     Dig {
-        target: (usize, usize, usize),
+        target: WorldPos,
     },
     Place {
-        target: (usize, usize, usize),
+        target: WorldPos,
         cube: Cube
     }
 }
@@ -259,13 +265,13 @@ impl AgentTask {
     /**
     * return the positions required by the agent in order to perform this task
     */
-    pub fn get_required_position(&self) -> Option<Vec<(usize, usize, usize)>> {
+    pub fn get_required_position(&self) -> Option<Vec<WorldPos>> {
         match self {
             AgentTask::Move { .. } => None,
             AgentTask::FindPath { .. } => None,
-            AgentTask::Plough { target } => Some(vec![(target.0, target.1, target.2 + 1)]),
-            AgentTask::Dig { target } => Some(find_horizontal_neighbours((target.0, target.1, target.2 + 1))),
-            AgentTask::Place { target, .. } => Some(find_horizontal_neighbours((target.0, target.1, target.2)))
+            AgentTask::Plough { target } => Some(vec![WorldPos::new(target.x, target.y, target.z + 1)]),
+            AgentTask::Dig { target } => Some(find_horizontal_neighbours(WorldPos::new(target.x, target.y, target.z + 1))),
+            AgentTask::Place { target, .. } => Some(find_horizontal_neighbours(WorldPos::new(target.x, target.y, target.z)))
         }
     }
 }
