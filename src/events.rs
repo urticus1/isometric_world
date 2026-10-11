@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use crate::WorldPos;
+use crate::grid::WorldPos;
 
 pub struct EventQueue {
     pub cube_events: VecDeque<GridChangeEvent>,

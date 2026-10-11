@@ -4,9 +4,10 @@ use std::collections::{BinaryHeap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
-use crate::{Compass, Sprite, WorldPos, GRID_HEIGHT, GRID_WIDTH};
+use crate::{Compass, Sprite};
 use crate::animation::{Animation, AnimationPool};
-use crate::grid::{find_horizontal_neighbours, Cube, Grid};
+use crate::cubes::Cube;
+use crate::grid::{Grid, WorldPos};
 
 pub fn find_path(start: WorldPos, end: WorldPos, grid: &Grid) -> Option<Vec<WorldPos>> {
     println!("{:?} -> {:?}", start, end);
@@ -270,8 +271,8 @@ impl AgentTask {
             AgentTask::Move { .. } => None,
             AgentTask::FindPath { .. } => None,
             AgentTask::Plough { target } => Some(vec![WorldPos::new(target.x, target.y, target.z + 1)]),
-            AgentTask::Dig { target } => Some(find_horizontal_neighbours(WorldPos::new(target.x, target.y, target.z + 1))),
-            AgentTask::Place { target, .. } => Some(find_horizontal_neighbours(WorldPos::new(target.x, target.y, target.z)))
+            AgentTask::Dig { target } => Some(WorldPos::new(target.x, target.y, target.z + 1).horizontal_neighbours()),
+            AgentTask::Place { target, .. } => Some(WorldPos::new(target.x, target.y, target.z).horizontal_neighbours()),
         }
     }
 }

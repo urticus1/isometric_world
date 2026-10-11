@@ -4,10 +4,11 @@ use std::sync::mpsc::Sender;
 use image::{open, RgbaImage};
 use rand::random_range;
 use crate::events::GridChangeEvent;
-use crate::grid::{Cube, Grid};
-use crate::{WorldPos, GRID_HEIGHT, GRID_WIDTH};
+use crate::grid::{Grid, WorldPos};
+use crate::{GRID_HEIGHT, GRID_WIDTH};
 use crate::agents::Agent;
 use crate::agents::Direction::Px;
+use crate::cubes::Cube;
 use crate::resources::{load_animations, CubeType};
 
 struct PerlinNoise {
@@ -135,7 +136,7 @@ pub fn place_workers(grid: &mut Grid) -> Vec<Agent> {
 
 fn find_ground_spawn_z(grid: &Grid, x: usize, y: usize) -> usize {
     for z in (0..GRID_HEIGHT).rev() {
-        if grid.get_cube(WorldPos::new(x, y, z)).cube_type.is_some() {
+        if grid.get_cube(WorldPos::new(x, y, z)).unwrap().cube_type.is_some() {
             return (z + 1).min(GRID_HEIGHT - 1);
         }
     }

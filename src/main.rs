@@ -6,9 +6,11 @@ mod input;
 mod resources;
 mod events;
 mod world_generation;
+mod camera;
+mod cubes;
 
 use std::cmp::PartialEq;
-use std::ops::Deref;
+use std::ops::{Add, Deref, Sub};
 use std::sync::{mpsc, Arc, Mutex};
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -19,7 +21,9 @@ use noise::{NoiseFn};
 use crate::agents::{find_path, Agent, AgentCoroutine, AgentEvent, AgentTask};
 use crate::agents::AgentEvent::AgentAddTask;
 use crate::agents::Direction::{Nx, Ny, Px, Py};
-use crate::grid::{Cube, Grid, Light};
+use crate::camera::Camera;
+use crate::cubes::Cube;
+use crate::grid::{Grid, Light, WorldPos};
 use crate::input::{InputBuffer, InputState};
 use crate::render::{draw_left_face, draw_right_face, draw_sprite, draw_top_face, CubeFace, Sprite};
 use crate::resources::{load_cube_sprites, CubeType};
@@ -278,7 +282,7 @@ fn main() {
     let mut selected_cube: Option<WorldPos> = None;
     let mut night_mode = false;
 
-    let mut compass = Compass::North;
+    let mut camera = Camera { compass: Compass::North };
     let mut input_buffer = InputBuffer::new();
     let mut selection_state = InputState {
         selected_agent: None
@@ -321,14 +325,14 @@ fn main() {
         }
 
         if let Some((sx, sy)) = window.get_mouse_pos(MouseMode::Clamp) {
-            selected_cube = select_cube_mouse(compass, ScreenPos::new(sx as u32, sy as u32), &*grid.lock().unwrap(), WorldPos::new(view_x, view_y, view_z));
+            selected_cube = select_cube_mouse(&camera, ScreenPos::new(sx as u32, sy as u32), &*grid.lock().unwrap(), WorldPos::new(view_x, view_y, view_z));
         }
 
         if let Some(ref sel) = selected_cube {
             if input_buffer.button_pressed(Key::Space) || input_buffer.left_mouse_pressed() {
                 {
                     let grid_lock = read_only_grid.lock().unwrap();
-                    let cube_data = grid_lock.get_cube(WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z));
+                    let cube_data = grid_lock.get_cube(WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z)).unwrap();
                     handle_selection(cube_data, &game_events, WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z), &mut selection_state);
                 }
             }
@@ -336,7 +340,7 @@ fn main() {
             if input_buffer.button_pressed(Key::X) {
                 {
                     let mut grid_lock = read_only_grid.lock().unwrap();
-                    if let None = grid_lock.get_cube(WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z)).agent {
+                    if let None = grid_lock.get_cube(WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z)).unwrap().agent {
                         grid_lock.delete_cube(WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z));
                     }
                 }
@@ -359,11 +363,11 @@ fn main() {
             }
 
             if input_buffer.button_pressed(Key::R) {
-                match compass {
-                    Compass::North => compass = Compass::East,
-                    Compass::East => compass = Compass::South,
-                    Compass::South => compass = Compass::West,
-                    Compass::West => compass = Compass::North
+                match camera.compass {
+                    Compass::North => camera.compass = Compass::East,
+                    Compass::East => camera.compass = Compass::South,
+                    Compass::South => camera.compass = Compass::West,
+                    Compass::West => camera.compass = Compass::North
                 }
             }
 
@@ -410,21 +414,19 @@ fn main() {
 
         //render
         let mut buffer = vec![0xFFFFFF; SCREEN_WIDTH * SCREEN_HEIGHT];
-        let flip_faces = compass != Compass::North && compass != Compass::South;
-
 
         for z in 0..VIEW_HEIGHT {
             for mut y in 0..VIEW_WIDTH {
-                if compass == Compass::East || compass == Compass::South {
-                    y = (VIEW_WIDTH - 1) - y;
-                }
                 for mut x in 0..VIEW_WIDTH {
-                    if  compass == Compass::South || compass == Compass::West {
-                        x = (VIEW_WIDTH - 1) - x;
-                    }
+                    let (x,y, _) = world_to_view_frame_local(camera.compass, (x as i32, y as i32, z as i32));
+                    let x = x as usize;
+                    let y = y as usize;
+
                     let cube_index = (x + view_x) + ((y + view_y) * GRID_WIDTH) + (z + view_z) * GRID_WIDTH * GRID_WIDTH;
 
-                    let (cube_screen_x, cube_screen_y) = get_screen_coord(compass, WorldPos::new(x,y,z));
+                    let cube_pos = WorldPos::new(x + view_x, y + view_y, z + view_z);
+
+                    let (cube_screen_x, cube_screen_y) = get_screen_coord(camera.compass, WorldPos::new(x,y,z));
 
                     if selected_cube.is_some() {
                         if WorldPos::new(x,y,z) == selected_cube.clone().unwrap() {
@@ -448,14 +450,15 @@ fn main() {
                         let highlight_colour = selection_state.selected_agent
                             .filter(|selected_agent| *selected_agent == agent.id as u8)
                             .map_or((0,0,0), |_| (125, 0, 0));
-                        draw_sprite((cube_screen_x, cube_screen_y), &agent.get_current_animation_frame(compass), &mut buffer, highlight_colour);
+                        draw_sprite((cube_screen_x, cube_screen_y), &agent.get_current_animation_frame(camera.compass), &mut buffer, highlight_colour);
                         continue;
                     }
 
                     let cube_light = if night_mode { cube_data.light_level } else { Light::max_level() };
 
 
-                    let (visible_face_left, visible_face_right, terminal_x_layer, terminal_y_layer) = match compass {
+                    //TODO change this no handle new faces
+                    let (visible_face_left, visible_face_right, terminal_x_layer, terminal_y_layer) = match camera.compass {
                         Compass::North => (CubeFace::pY, CubeFace::pX, VIEW_WIDTH - 1, VIEW_WIDTH - 1),
                         Compass::East => (CubeFace::pX, CubeFace::nY, VIEW_WIDTH - 1, 0),
                         Compass::South =>  (CubeFace::nY, CubeFace::nX, 0, 0),
@@ -470,26 +473,41 @@ fn main() {
                         (left, right, top)
                     };
 
+                    let terminal_x_layer = VIEW_WIDTH - 1; //TODO this changes each rot
+                    let terminal_y_layer = VIEW_WIDTH - 1;
+                    let terminal_z_layer = VIEW_HEIGHT - 1;
+
+
+                    let (blocking_left, blocking_right, blocking_top) = {
+                        let grid = read_only_grid.lock().unwrap();
+                        (
+                            cube_pos.next_y().map(|p| grid.get_cube(p).unwrap().clone()), //TODO need to transform p back to world pos
+                            cube_pos.next_x().map(|p| grid.get_cube(p).unwrap().clone()),
+                            cube_pos.above().map(|p| grid.get_cube(p).unwrap().clone())
+                        )
+                    };
+
+
                     if let Some(next_y) = blocking_left {
                         if next_y.is_transparent() {
-                            let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
+                            let face = cube_data.cube_py_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
                             draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
                         }
                     }
                     else {
-                        let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
+                        let face = cube_data.cube_py_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
                         draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
                     }
 
 
                     if let Some(next_x) = blocking_right {
                         if next_x.is_transparent() {
-                            let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
+                            let face = cube_data.cube_px_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
                             draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
                         }
                     }
                     else {
-                        let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
+                        let face = cube_data.cube_px_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
                         draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
                     }
 
@@ -508,23 +526,13 @@ fn main() {
                     }
 
                     if x == terminal_x_layer {
-                        let face = cube_data.cube_x_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
-                        if flip_faces {
-                            draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
-                        }
-                        else {
-                            draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
-                        }
+                        let face = cube_data.cube_px_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
+                        draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level));
                     }
 
                     if y == terminal_y_layer {
-                        let face = cube_data.cube_y_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
-                        if flip_faces {
-                            draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
-                        }
-                        else {
-                            draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
-                        }
+                        let face = cube_data.cube_py_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
+                        draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level));
                     }
 
                 }
@@ -562,8 +570,6 @@ fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube
 
 }
 
-
-
 #[derive(PartialEq, Copy, Clone)]
 enum Compass {
     North,
@@ -580,11 +586,19 @@ fn get_screen_coord(compass: Compass, world_space: WorldPos) -> (usize, usize) {
     let (camera_x_dir, camera_y_dir, x_offset, y_offset) = match compass {
         Compass::North => ((1i32, -1i32, 0i32), (1i32,  1i32, -2i32), 0, -1i32 * SCREEN_Y_OFFSET as i32),
         Compass::East => ((-1i32, -1i32, 0i32), (1i32,  -1i32, -2i32), SCREEN_X_OFFSET as i32, 0 as i32),
-        Compass::South => ((-1i32, 1i32, 0i32), (-1i32,  -1i32, -2i32), 0, (SCREEN_Y_OFFSET as f32 * 1.5) as i32), //TODO this will cause rounding errors going back to mouse
+        Compass::South => ((-1i32, 1i32, 0i32), (-1i32,  -1i32, -2i32), 0, (SCREEN_Y_OFFSET as f32 * 1.5) as i32),
         Compass::West => ((1i32, 1i32, 0i32), (-1i32,  1i32, -2i32), -1i32 * SCREEN_X_OFFSET as i32, 0 as i32),
     };
-    let sx = dot(camera_x_dir, world_space);
-    let sy = dot(camera_y_dir, world_space);
+
+    let (camera_x_dir, camera_y_dir, x_offset, y_offset) = ((1i32, -1i32, 0i32), (1i32,  1i32, -2i32), 0, -1i32 * SCREEN_Y_OFFSET as i32);
+    let rotated_world_pos = world_to_view_frame_local(compass, world_space);
+
+    fn dot(p0: (i32, i32, i32), p1: (i32, i32, i32)) -> i32 {
+        p0.0 * p1.0 + p0.1 * p1.1 + p0.2 * p1.2
+    }
+
+    let sx = dot(camera_x_dir, rotated_world_pos);
+    let sy = dot(camera_y_dir, rotated_world_pos);
     let sx = sx * (TILE_WIDTH / 2) as i32 + ((SCREEN_WIDTH / 2) as i32);
     let sy = sy  * (TILE_HALF_WIDTH / 2) as i32 + ((SCREEN_HEIGHT / 2) as i32);
 
@@ -594,85 +608,134 @@ fn get_screen_coord(compass: Compass, world_space: WorldPos) -> (usize, usize) {
     )
 }
 
-fn dot(p0: (i32, i32, i32), p1: (i32, i32, i32)) -> i32 {
-    p0.0 * p1.0 + p0.1 * p1.1 + p0.2 * p1.2
-}
-
-
 //even though this returns a 'world pos' it is relative to the view window
-fn select_cube_mouse(compass: Compass, screen_space: ScreenPos, grid: &Grid, view_point: WorldPos) -> Option<WorldPos> {
-    let (sx, sy) = match compass {
+fn select_cube_mouse(camera: &Camera, screen_space: ScreenPos, grid: &Grid, view_point: WorldPos) -> Option<WorldPos> {
+    let x = screen_space.x as f32;
+    let y = screen_space.y as f32;
+    let screen_height = SCREEN_HEIGHT as f32;
+    let screen_width = SCREEN_WIDTH as f32;
+
+    //invert translation of origin first
+    let (sx, sy) = match camera.compass {
         Compass::North => (
-            screen_space.x as f32 - SCREEN_WIDTH as f32 / 2.0,
-            screen_space.y as f32 - (SCREEN_HEIGHT as f32 / 2.0) + SCREEN_Y_OFFSET as f32
+            x - (screen_width / 2.0),
+            y - (screen_height / 2.0) + SCREEN_Y_OFFSET as f32
         ),
         Compass::East => (
-            screen_space.x as f32 - (SCREEN_WIDTH as f32 / 2.0) - SCREEN_X_OFFSET as f32,
-            screen_space.y as f32 - (SCREEN_HEIGHT as f32 / 2.0)
+            x - (screen_width / 2.0) - SCREEN_X_OFFSET as f32,
+            y - (screen_height / 2.0)
         ),
         Compass::South => (
-            screen_space.x as f32 - (SCREEN_WIDTH as f32 / 2.0),
-            screen_space.y as f32 - (SCREEN_HEIGHT as f32 / 2.0) - (SCREEN_Y_OFFSET as f32 * 1.5)
+            x - (screen_width / 2.0),
+            y - (screen_height / 2.0) - (SCREEN_Y_OFFSET as f32 * 1.5)
         ),
         Compass::West => (
-            screen_space.x as f32 - (SCREEN_WIDTH as f32 / 2.0) + SCREEN_X_OFFSET as f32,
-            screen_space.y as f32 - (SCREEN_HEIGHT as f32 / 2.0)
+            x - (screen_width / 2.0) + SCREEN_X_OFFSET as f32,
+            y - (screen_height / 2.0)
         ),
     };
 
     //not in inverse but shift mousePos over by half tile so that boundry isnt in centre of sprite
     let sx = sx - TILE_HALF_WIDTH as f32;
-    let sy = sy - TILE_HALF_WIDTH as f32;
+    let sy = sy - (TILE_HALF_WIDTH / 2) as f32;
 
+    //scaling
     let sx = sx / (TILE_WIDTH / 2) as f32;
     let sy = sy / (TILE_HALF_WIDTH / 2) as f32;
 
-    for z in (0..VIEW_HEIGHT as i32).rev() {
+    for z in (0..VIEW_HEIGHT).rev() {
 
-        let (x, y) = match compass {
+        //undo iso rotation
+        let z = z as f32;
+        let (x, y) = match camera.compass {
             Compass::North => (
-                ((sx + sy + 2.0 * z as f32) / 2.0).round() as i32,
-                ((sy - sx + 2.0 * z as f32) / 2.0).round() as i32
+                (sx + sy + 2.0 * z) / 2.0,
+                (sy - sx + 2.0 * z ) / 2.0
             ),
             Compass::East => (
-                ((sy - sx + 2.0 * z as f32) / 2.0).round() as i32,
-                ((-sy - sx - 2.0 * z as f32) / 2.0).round() as i32
+                (sy - sx + 2.0 * z) / 2.0,
+                (-sy - sx - 2.0 * z) / 2.0
             ),
             Compass::South => (
-                ((-sx - sy - 2.0 * z as f32) / 2.0).round() as i32,
-                ((sx - sy - 2.0 * z as f32) / 2.0).round() as i32
+                (-sx - sy - 2.0 * z) / 2.0,
+                (sx - sy - 2.0 * z) / 2.0
             ),
             Compass::West => (
-                ((sx - sy - 2.0 * z as f32) / 2.0).round() as i32,
-                ((sy + sx + 2.0 * z as f32) / 2.0).round() as i32
+                (sx - sy - 2.0 * z) / 2.0,
+                (sy + sx + 2.0 * z) / 2.0
             )
-
         };
 
-        if x < 0 || y < 0 {
-            continue; //outside of the grid
+        enum Side {
+            Left, Right
         }
 
-        let pos = (x as usize, y as usize, z as usize);
+        let side_to_check = if x - x.round() < y - y.round() { Side::Left } else { Side::Right }; //todo this is not generalized for rotations
 
-        let index = grid.get_vector_pos(WorldPos::new(x as usize + view_point.x, y as usize + view_point.y, z as usize + view_point.z));
-        match index {
-            Ok(_) => {
-                let cube = grid.get_cube(WorldPos::new(x as usize + view_point.x, y as usize + view_point.y, z as usize + view_point.z));
-                if cube.cube_type.is_some() || cube.agent.is_some() {
-                    return Some(WorldPos::new(x as usize, y as usize, z as usize));
-                }
+        let x = x.round() as usize;
+        let y = y.round() as usize;
+        let z = z as usize;
+        let hit_in_layer = WorldPos::new(x + view_point.x, y + view_point.y, z + view_point.z);
+
+        //every layer hits the top face of one cube. This face obscures two cubes behind it so three cubes need to be checked per layer before going down to (x-1,y-1,z-1)
+        let cubes_to_check_in_layer = [
+            Some(hit_in_layer),
+            match side_to_check {
+                Side::Left => camera.get_blocked_cube_left(hit_in_layer),
+                Side::Right => camera.get_blocked_cube_right(hit_in_layer)
             },
-            Err(_) => {
-                continue
+            {
+                let x_index = (view_point.x + x) as i32 + camera.direction().0 as i32;
+                let y_index = (view_point.y + y) as i32 + camera.direction().1 as i32;
+                if x_index < 0 || y_index < 0 || x_index >= GRID_WIDTH as i32 || y_index >= GRID_WIDTH as i32 {
+                    continue
+                }
+                let cube_behind = WorldPos::new(x_index as usize, y_index as usize, z + view_point.z);
+                if let Err(_) = grid.get_vector_pos(cube_behind) {
+                    continue
+                }
+                Some(cube_behind)
             }
-        }
+        ];
 
+        let hit = cubes_to_check_in_layer.into_iter()
+            .flatten()
+            .filter(|pos| grid.is_valid_worldpos(pos))
+            .filter(|pos| {
+                println!("{:?}", pos);
+                let cube = grid.get_cube(*pos).unwrap();
+                println!("{:?}", cube.cube_type.is_some() || cube.agent.is_some());
+                cube.cube_type.is_some() || cube.agent.is_some()
+            })
+            .map(|pos| pos - view_point) //todo this can underflow
+            .find(|pos| true);
+
+        if let Some(hit) = hit {
+            return Some(hit);
+        }
     }
     None
 }
 
-#[derive(Clone, Copy)]
+fn world_to_view_frame_local(compass: Compass, pos: (i32, i32, i32)) -> (i32, i32, i32) {
+    match compass {
+        Compass::North => (pos.0, pos.1, pos.2),
+        Compass::East => (pos.0, VIEW_WIDTH as i32 - 1 - pos.1, pos.2),
+        Compass::South => (VIEW_WIDTH as i32  - 1 - pos.0, VIEW_WIDTH as i32  - 1 - pos.1, pos.2),
+        Compass::West => (VIEW_WIDTH as i32  - 1 - pos.0, pos.1, pos.2),
+    }
+}
+
+fn view_frame_local_to_world(compass: Compass, pos: (i32, i32, i32)) -> (i32, i32, i32) {
+    match compass {
+        Compass::North => (pos.0, pos.1, pos.2),
+        Compass::East => (pos.0, VIEW_WIDTH as i32 - 1 - pos.1, pos.2),
+        Compass::South => (VIEW_WIDTH as i32  - 1 - pos.0, VIEW_WIDTH as i32  - 1 - pos.1, pos.2),
+        Compass::West => (VIEW_WIDTH as i32  - 1 - pos.0, pos.1, pos.2),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 struct ScreenPos {
     pub x: u32,
     pub y: u32,
@@ -683,59 +746,3 @@ impl ScreenPos {
         ScreenPos { x, y }
     }
 }
-
-#[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-struct WorldPos {
-    pub x: usize,
-    pub y: usize,
-    pub z: usize,
-}
-
-impl WorldPos {
-    fn new(x: usize, y: usize, z: usize) -> WorldPos {
-        WorldPos { x, y, z }
-    }
-
-    fn above(&self) -> Option<WorldPos> {
-        if self.z < GRID_HEIGHT - 1 {
-            return Some(WorldPos::new(self.x, self.y, self.z + 1));
-        }
-        None
-    }
-
-    fn below(&self) -> Option<WorldPos> {
-        if self.z > 0 {
-            return Some(WorldPos::new(self.x, self.y, self.z - 1));
-        }
-        None
-    }
-
-    fn next_x(&self) -> Option<WorldPos> {
-        if self.x < GRID_WIDTH - 1 {
-            return Some(WorldPos::new(self.x + 1, self.y, self.z));
-        }
-        None
-    }
-
-    fn prev_x(&self) -> Option<WorldPos> {
-        if self.x > 0 {
-            return Some(WorldPos::new(self.x - 1, self.y, self.z));
-        }
-        None
-    }
-
-    fn next_y(&self) -> Option<WorldPos> {
-        if self.y < GRID_WIDTH - 1 {
-            return Some(WorldPos::new(self.x, self.y + 1, self.z));
-        }
-        None
-    }
-
-    fn prev_y(&self) -> Option<WorldPos> {
-        if self.y > 0 {
-            return Some(WorldPos::new(self.x, self.y - 1, self.z));
-        }
-        None
-    }
-}
-
