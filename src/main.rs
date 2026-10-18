@@ -17,9 +17,7 @@ use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
-use minifb::KeyRepeat::No;
 use noise::{NoiseFn};
-use rand::rand_core::block;
 use crate::agents::{find_path, Agent, AgentCoroutine, AgentEvent, AgentTask};
 use crate::agents::AgentEvent::AgentAddTask;
 use crate::agents::Direction::{Nx, Ny, Px, Py};
@@ -281,7 +279,7 @@ fn main() {
     let mut view_y = GRID_WIDTH - VIEW_WIDTH;
     let mut view_z = GRID_HEIGHT - VIEW_HEIGHT;
 
-    let mut selected_cube: Option<WorldPos> = None;
+    let mut selected_cube: Option<ViewFramePos> = None;
     let mut night_mode = false;
 
     let mut camera = Camera { compass: Compass::North };
@@ -326,6 +324,14 @@ fn main() {
             view_y += 1;
         }
 
+        if input_buffer.button_pressed(Key::H) {
+            view_x = GRID_WIDTH - VIEW_WIDTH;
+            view_y = GRID_WIDTH - VIEW_WIDTH;
+            view_z = GRID_HEIGHT - VIEW_HEIGHT;
+        }
+
+        let view_window_origin = WorldPos::new(view_x,  view_y, view_z);
+
         if input_buffer.button_pressed(Key::R) {
             match camera.compass {
                 Compass::North => camera.compass = Compass::East,
@@ -336,82 +342,79 @@ fn main() {
         }
 
         if let Some((sx, sy)) = window.get_mouse_pos(MouseMode::Clamp) {
-            //selected_cube = select_cube_mouse(&camera, ScreenPos::new(sx as u32, sy as u32), &*grid.lock().unwrap(), WorldPos::new(view_x, view_y, view_z));
+            selected_cube = select_cube_mouse(&camera, ScreenPos::new(sx as u32, sy as u32), &*grid.lock().unwrap(), WorldPos::new(view_x, view_y, view_z));
         }
 
-        if let Some(ref sel) = selected_cube {
-            if input_buffer.button_pressed(Key::Space) || input_buffer.left_mouse_pressed() {
-                {
-                    let grid_lock = read_only_grid.lock().unwrap();
-                    let cube_data = grid_lock.get_cube(WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z)).unwrap();
-                    handle_selection(cube_data, &game_events, WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z), &mut selection_state);
-                }
-            }
-
-            if input_buffer.button_pressed(Key::X) {
-                {
-                    let mut grid_lock = read_only_grid.lock().unwrap();
-                    if let None = grid_lock.get_cube(WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z)).unwrap().agent {
-                        grid_lock.delete_cube(WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z));
+        if let Some(sel) = selected_cube {
+            let selected_cube_world_pos = view_frame_local_to_valid_grid_pos(camera.compass, sel, view_window_origin);
+            if let Some(rel) = selected_cube_world_pos {
+                let actual_cube_pos = rel + view_window_origin;
+                if input_buffer.button_pressed(Key::Space) || input_buffer.left_mouse_pressed() {
+                    {
+                        let grid_lock = read_only_grid.lock().unwrap();
+                        let cube_data = grid_lock.get_cube(actual_cube_pos).unwrap();
+                        handle_selection(cube_data, &game_events, actual_cube_pos, &mut selection_state);
                     }
                 }
-            }
 
-            if input_buffer.right_mouse_pressed() {
-                if selection_state.selected_agent.is_some() {
-                    selection_state.selected_agent = None;
-                }
-                else {
-                    let above = WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z + 1);
-                    if above.z < GRID_HEIGHT {
+                if input_buffer.button_pressed(Key::X) {
+                    {
                         let mut grid_lock = read_only_grid.lock().unwrap();
-                        if !grid_lock.is_occupied(above) {
-                            grid_lock.place_cube(above, Cube::new(CubeType::Stone));
+                        if let None = grid_lock.get_cube(actual_cube_pos).unwrap().agent {
+                            grid_lock.delete_cube(actual_cube_pos);
                         }
                     }
                 }
 
-            }
+                if input_buffer.right_mouse_pressed() {
+                    if selection_state.selected_agent.is_some() {
+                        selection_state.selected_agent = None;
+                    }
+                    else {
+                        if let Some(above) = actual_cube_pos.above() {
+                            let mut grid_lock = read_only_grid.lock().unwrap();
+                            if !grid_lock.is_occupied(above) {
+                                grid_lock.place_cube(above, Cube::new(CubeType::Stone));
+                            }
+                        }
+                    }
 
+                }
 
-            if input_buffer.button_pressed(Key::P) {
-                let world_pos = WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z);
-                if let Some(agent_id) = selection_state.selected_agent {
-                    let _ = game_events.send(AgentAddTask {
-                        task: AgentTask::Plough {
-                            target: world_pos,
-                        },
-                        agent: agent_id as usize,
-                    });
+                if input_buffer.button_pressed(Key::P) {
+                    if let Some(agent_id) = selection_state.selected_agent {
+                        let _ = game_events.send(AgentAddTask {
+                            task: AgentTask::Plough {
+                                target: actual_cube_pos,
+                            },
+                            agent: agent_id as usize,
+                        });
+                    }
                 }
-            }
-            if input_buffer.button_pressed(Key::K) {
-                let world_pos = WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + view_z);
-                if let Some(agent_id) = selection_state.selected_agent {
-                    let _ = game_events.send(AgentAddTask {
-                        task: AgentTask::Dig {
-                            target: world_pos,
-                        },
-                        agent: agent_id as usize,
-                    });
+                if input_buffer.button_pressed(Key::K) {
+                    if let Some(agent_id) = selection_state.selected_agent {
+                        let _ = game_events.send(AgentAddTask {
+                            task: AgentTask::Dig {
+                                target: actual_cube_pos,
+                            },
+                            agent: agent_id as usize,
+                        });
+                    }
                 }
-            }
-            if input_buffer.button_pressed(Key::L) {
-                let world_pos = WorldPos::new(sel.x + view_x, sel.y + view_y, sel.z + 1 + view_z);
-                if let Some(agent_id) = selection_state.selected_agent {
-                    let _ = game_events.send(AgentAddTask {
-                        task: AgentTask::Place {
-                            target: world_pos,
-                            cube: Cube::new(CubeType::Lantern)
-                        },
-                        agent: agent_id as usize,
-                    });
+                if input_buffer.button_pressed(Key::L) {
+                    if let Some(above) = actual_cube_pos.above() {
+                        if let Some(agent_id) = selection_state.selected_agent {
+                            let _ = game_events.send(AgentAddTask {
+                                task: AgentTask::Place {
+                                    target: above,
+                                    cube: Cube::new(CubeType::Lantern)
+                                },
+                                agent: agent_id as usize,
+                            });
+                        }
+                    }
+
                 }
-            }
-            if input_buffer.button_pressed(Key::H) {
-                view_x = GRID_WIDTH - VIEW_WIDTH;
-                view_y = GRID_WIDTH - VIEW_WIDTH;
-                view_z = GRID_HEIGHT - VIEW_HEIGHT;
             }
         }
 
@@ -427,12 +430,11 @@ fn main() {
                         let view_frame_local_pos = ViewFramePos::new(x as i32, y as i32, z as i32);
                         let rel = view_frame_local_to_world(camera.compass, view_frame_local_pos);   // view-relative world
                         let real_cube_pos = WorldPos::new(rel.x + view_x, rel.y + view_y, rel.z + view_z);
-                        let view_window_origin = WorldPos::new(view_x,  view_y, view_z);
 
                         let (cube_screen_x, cube_screen_y) = get_screen_coord(view_frame_local_pos);
 
-                        if selected_cube.is_some() {
-                            if WorldPos::new(x,y,z) == selected_cube.clone().unwrap() {
+                        if let Some(selected) = selected_cube {
+                            if view_frame_local_pos == selected {
                                 draw_sprite((cube_screen_x, cube_screen_y), &select_cube, &mut buffer, (0,0,0));
                                 continue;
                             }
@@ -460,12 +462,7 @@ fn main() {
 
 
                         //TODO change this no handle new faces
-                        let (visible_face_left, visible_face_right) = match camera.compass {
-                            Compass::North => (CubeFace::pY, CubeFace::pX),
-                            Compass::East => (CubeFace::pX, CubeFace::nY),
-                            Compass::South =>  (CubeFace::nY, CubeFace::nX),
-                            Compass::West => (CubeFace::nX, CubeFace::pY)
-                        };
+                        let (visible_face_left, visible_face_right) = camera.visible_faces();
 
                         let terminal_x_layer = VIEW_WIDTH - 1;
                         let terminal_y_layer = VIEW_WIDTH - 1;
@@ -492,7 +489,6 @@ fn main() {
 
                             (bl, br, bt)
                         };
-
 
                         if let Some(next_y) = blocking_left {
                             if next_y.is_transparent() {
@@ -555,7 +551,6 @@ fn main() {
 
 fn find_sprite<'a>(cube_data: &Cube, sprites: &'a Vec<Sprite>) -> Option<&'a Sprite> {
     cube_data.cube_type.map_or(None, |cube| Some(&sprites[cube as usize]))
-
 }
 
 fn handle_selection(cube: &Cube, game_events: &Sender<AgentEvent>, selected_cube: WorldPos, selection_state: &mut InputState) {
@@ -607,7 +602,7 @@ fn get_screen_coord(world_space: ViewFramePos) -> (usize, usize) {
 }
 
 //even though this returns a 'world pos' it is relative to the view window
-fn select_cube_mouse(camera: &Camera, screen_space: ScreenPos, grid: &Grid, view_point: WorldPos) -> Option<WorldPos> {
+fn select_cube_mouse(camera: &Camera, screen_space: ScreenPos, grid: &Grid, view_frame_origin: WorldPos) -> Option<ViewFramePos> {
     let x = screen_space.x as f32;
     let y = screen_space.y as f32;
     let screen_height = SCREEN_HEIGHT as f32;
@@ -633,52 +628,41 @@ fn select_cube_mouse(camera: &Camera, screen_space: ScreenPos, grid: &Grid, view
         let z = z as f32;
         let (x, y) = (
             (sx + sy + 2.0 * z) / 2.0,
-            (sy - sx + 2.0 * z ) / 2.0
+            (sy - sx + 2.0 * z) / 2.0
         );
 
         enum Side {
-            Left, Right
+            Left,
+            Right
         }
 
-        let side_to_check = if x - x.round() < y - y.round() { Side::Left } else { Side::Right }; //todo this is not generalized for rotations
+        let side_to_check = if x - x.round() < y - y.round() { Side::Left } else { Side::Right };
 
-        let x = x.round() as usize;
-        let y = y.round() as usize;
-        let z = z as usize;
-        let hit_in_layer = WorldPos::new(x + view_point.x, y + view_point.y, z + view_point.z);
+        let x = x.round() as i32;
+        let y = y.round() as i32;
+        let z = z as i32;
+        let hit_in_layer = ViewFramePos::new(x, y, z);
 
         //every layer hits the top face of one cube. This face obscures two cubes behind it so three cubes need to be checked per layer before going down to (x-1,y-1,z-1)
         let cubes_to_check_in_layer = [
-            Some(hit_in_layer),
+            hit_in_layer,
             match side_to_check {
-                Side::Left => hit_in_layer.prev_x(),
-                Side::Right => hit_in_layer.prev_y()
+                Side::Left => ViewFramePos::new(x - 1, y, z),
+                Side::Right => ViewFramePos::new(x, y - 1, z),
             },
-            if hit_in_layer.x > 0 && hit_in_layer.y > 0 {
-                Some(WorldPos::new(hit_in_layer.x - 1, hit_in_layer.y - 1, hit_in_layer.z))
-            }
-            else { None },
+            ViewFramePos::new((hit_in_layer.x - 1), (hit_in_layer.y - 1), hit_in_layer.z)
         ];
 
-        for hit in cubes_to_check_in_layer {
-            if let Some(hit) = hit {
-
+        for view_local in cubes_to_check_in_layer.into_iter() {
+            let actual_grid_pos = view_frame_local_to_valid_grid_pos(camera.compass, view_local, view_frame_origin);
+            if let Some(actual_grid_pos) = actual_grid_pos {
+                let cube = grid.get_cube(actual_grid_pos);
+                if let Ok(cube) = cube {
+                    if cube.cube_type.is_some() || cube.agent.is_some() {
+                        return Some(view_local);
+                    }
+                }
             }
-        }
-
-        let hit = cubes_to_check_in_layer.into_iter()
-            .flatten()
-            //.map(|view_frame_pos| view_frame_local_to_world(camera.compass, view_frame_pos))
-            .filter(|pos| grid.is_valid_worldpos(pos))
-            .filter(|pos| {
-                let cube = grid.get_cube(*pos).unwrap();
-                cube.cube_type.is_some() || cube.agent.is_some()
-            })
-            .map(|pos| pos - view_point) //todo this can underflow
-            .find(|pos| true);
-
-        if let Some(hit) = hit {
-            return Some(hit);
         }
     }
     None

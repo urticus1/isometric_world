@@ -1,5 +1,4 @@
 use crate::{Compass};
-use crate::grid::WorldPos;
 use crate::render::CubeFace;
 
 pub struct Camera {
