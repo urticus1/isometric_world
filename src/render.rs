@@ -13,7 +13,6 @@ const GREEN_MASK: u32 = (0b11111111u8 as u32) << 8;
 const BLUE_MASK: u32 = (0b11111111u8 as u32);
 
 
-
 pub struct Sprite {
     pub pixels: [u32; TILE_WIDTH * TILE_WIDTH],
 }
@@ -45,17 +44,19 @@ pub fn light_flood_fill(start: WorldPos, light_level: u8, grid: &mut Grid) {
         for i in 0..layer_size {
             let current = queue.pop_front().unwrap();
             let mut cube = grid.get_cube_mut(current);
-            cube.light_level = cube.light_level + Light::from_level(light_level);
 
-            if !cube.is_transparent() {
-                continue;
-            }
-            for neighbour in current.face_neighbours() {
-                if !seen.contains(&neighbour) {
-                    seen.insert(neighbour);
-                    queue.push_back(neighbour);
+            if let Some(cube_light) = cube.light_level {
+                cube.light_level = Some(cube_light + Light::from_level(light_level));
+
+                for neighbour in current.face_neighbours() {
+                    if !seen.contains(&neighbour) {
+                        seen.insert(neighbour);
+                        queue.push_back(neighbour);
+                    }
                 }
             }
+
+
         }
         light_level -= 1;
     }
@@ -73,11 +74,11 @@ pub fn remove_light(start: WorldPos, light_level: u8, grid: &mut Grid) {
         for i in 0..layer_size {
             let current = queue.pop_front().unwrap();
             let mut cube = grid.get_cube_mut(current);
-            cube.light_level = Light::min_level();
 
             if !cube.is_transparent() {
                 continue;
             }
+            cube.light_level = Some(Light::min_level());
             for neighbour in current.face_neighbours() {
                 if !seen.contains(&neighbour) {
                     seen.insert(neighbour);
@@ -89,11 +90,11 @@ pub fn remove_light(start: WorldPos, light_level: u8, grid: &mut Grid) {
     }
 }
 
-fn draw_face(face: Face, screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, light: (u8, u8, u8)) {
+pub fn draw_face(face: Face, screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, light: Light) {
     let pixels = match face {
-        Face::TOP => TOP_FACE_PIXELS.iter(),
-        Face::LEFT => LEFT_FACE_PIXELS.iter(),
-        Face::RIGHT => RIGHT_FACE_PIXELS.iter(),
+        Face::Top => TOP_FACE_PIXELS.iter(),
+        Face::Left => LEFT_FACE_PIXELS.iter(),
+        Face::Right => RIGHT_FACE_PIXELS.iter(),
     };
 
     if screen_pos.0 > SCREEN_WIDTH || screen_pos.1 > SCREEN_HEIGHT {
@@ -111,9 +112,9 @@ fn draw_face(face: Face, screen_pos: (usize, usize), sprite: &Sprite, buffer: &m
         let g = ((value & GREEN_MASK) >> 8) as u8;
         let b = (value & BLUE_MASK) as u8;
 
-        let r = r.saturating_sub(255 - light.0) as u32;
-        let g = g.saturating_sub(255 - light.1) as u32;
-        let b = b.saturating_sub(255 - light.2) as u32;
+        let r = r.saturating_sub(255 - light.r) as u32;
+        let g = g.saturating_sub(255 - light.g) as u32;
+        let b = b.saturating_sub(255 - light.b) as u32;
 
         let val = 0u32 | r << 16 | g << 8 | b;
 
@@ -124,9 +125,9 @@ fn draw_face(face: Face, screen_pos: (usize, usize), sprite: &Sprite, buffer: &m
 }
 
 pub enum Face {
-    LEFT,
-    RIGHT,
-    TOP
+    Left,
+    Right,
+    Top
 }
 
 pub enum CubeFace {
@@ -137,17 +138,6 @@ pub enum CubeFace {
     Z
 }
 
-pub fn draw_top_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, light: (u8, u8, u8)) {
-    draw_face(Face::TOP, screen_pos, sprite, buffer, light);
-}
-
-pub fn draw_left_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, light: (u8, u8, u8)) {
-    draw_face(Face::LEFT, screen_pos, sprite, buffer, light);
-}
-
-pub fn draw_right_face(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, light: (u8, u8, u8)) {
-    draw_face(Face::RIGHT, screen_pos, sprite, buffer, light);
-}
 
 pub fn draw_sprite(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, highlight: (u8, u8, u8)) {
     if screen_pos.0 > SCREEN_WIDTH || screen_pos.1 > SCREEN_HEIGHT {

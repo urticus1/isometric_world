@@ -19,14 +19,17 @@ pub struct Grid {
 
 impl Grid {
 
-    pub fn handle_grid_change_event(&mut self, event: &GridChangeEvent) {
+    pub fn handle_grid_change_event(&mut self, event: GridChangeEvent) {
         match event {
             GridChangeEvent::Delete{position, cube} => {
-
                 if cube.cube_type.is_some() && cube.cube_type.unwrap() == CubeType::Lantern {
-                    remove_light(*position, 10, self);
+                    remove_light(position, 10, self);
                 }
-
+                //TODO kick off flood fill from neighbours
+            }
+            GridChangeEvent::MoveAgent { from, to} => {
+                let agent = self.get_cube_mut(from).agent.take();
+                self.get_cube_mut(to).agent = agent;
             }
         }
     }
@@ -65,6 +68,11 @@ impl Grid {
         self.delete_cube(from);
     }
 
+    pub fn move_agent(&mut self, from: WorldPos, to: WorldPos) {
+        let agent = self.get_cube_mut(from).agent.take();
+        self.get_cube_mut(to).agent = agent;
+    }
+
     pub fn delete_cube(&mut self, pos: WorldPos) {
         let index = self.get_vector_pos(pos).unwrap();
         let deleted = self.grid[index].clone();
@@ -77,10 +85,10 @@ impl Grid {
 
     pub fn place_cube(&mut self, pos: WorldPos, cube: Cube) {
         let index = self.get_vector_pos(pos).unwrap();
-        self.grid[index] = cube;
         if cube.cube_type == Some(CubeType::Lantern) {
             light_flood_fill(pos, 10, self);
         }
+        self.grid[index] = cube;
     }
 
     pub fn spawn_agent(&mut self, agent: &Agent) {
@@ -121,33 +129,33 @@ impl IndexMut<usize> for Grid {
 
 #[derive(Copy, Clone)]
 pub struct Light {
-    pub x_level: u8,
-    pub y_level: u8,
-    pub z_level: u8,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
 }
 
 impl Light {
     pub fn new(x_level: u8, y_level: u8, z_level: u8) -> Self {
         Light {
-            x_level,
-            y_level,
-            z_level,
+            r: x_level,
+            g: y_level,
+            b: z_level,
         }
     }
 
     pub fn max_level() -> Light {
         Light {
-            x_level: 220,
-            y_level: 245,
-            z_level: 255,
+            r: 220,
+            g: 245,
+            b: 255,
         }
     }
 
     pub fn min_level() -> Light {
         Light {
-            x_level: 100,
-            y_level: 100,
-            z_level: 100,
+            r: 100,
+            g: 100,
+            b: 100,
         }
     }
 
@@ -162,9 +170,9 @@ impl Light {
         };
 
         Light::new(
-            interpolate(min.x_level, max.x_level),
-            interpolate(min.y_level, max.y_level),
-            interpolate(min.z_level, max.z_level),
+            interpolate(min.r, max.r),
+            interpolate(min.g, max.g),
+            interpolate(min.b, max.b),
         )
     }
 }
@@ -174,9 +182,9 @@ impl ops::Add<Light> for Light {
 
     fn add(self, _rhs: Light) -> Light {
         Light {
-            x_level: max(self.x_level, _rhs.x_level),
-            y_level: max(self.y_level, _rhs.y_level),
-            z_level: max(self.z_level, _rhs.z_level),
+            r: max(self.r, _rhs.r),
+            g: max(self.g, _rhs.g),
+            b: max(self.b, _rhs.b),
         }
     }
 }

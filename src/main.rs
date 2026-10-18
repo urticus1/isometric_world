@@ -12,7 +12,7 @@ mod cubes;
 use std::cmp::PartialEq;
 use std::ops::{Add, Deref, Sub};
 use std::sync::{mpsc, Arc, Mutex};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
@@ -23,16 +23,16 @@ use crate::agents::AgentEvent::AgentAddTask;
 use crate::agents::Direction::{Nx, Ny, Px, Py};
 use crate::camera::Camera;
 use crate::cubes::Cube;
+use crate::events::GridChangeEvent;
 use crate::grid::{Grid, Light, WorldPos};
 use crate::input::{InputBuffer, InputState};
-use crate::render::{draw_left_face, draw_right_face, draw_sprite, draw_top_face, CubeFace, Sprite};
+use crate::render::{draw_face, draw_sprite,  CubeFace, Face, Sprite};
 use crate::resources::{load_cube_sprites, CubeType};
 use crate::world_generation::{place_workers, prepare_grid};
 
 const SCREEN_WIDTH: usize = 2000;
 const SCREEN_HEIGHT: usize = 1200;
 const SCREEN_Y_OFFSET: usize = SCREEN_HEIGHT / 4;
-const SCREEN_X_OFFSET: usize = SCREEN_WIDTH / 4;
 
 const TILE_WIDTH: usize = 24;
 const TILE_HALF_WIDTH: usize = TILE_WIDTH / 2;
@@ -43,10 +43,8 @@ const GRID_WIDTH: usize = 300;
 const VIEW_HEIGHT: usize = 20;
 const VIEW_WIDTH: usize = 60;
 
-const SUN_LIGHT: (u8, u8, u8) = (205, 225, 235);
 
-
-fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
+fn advance_task(agent: &mut Agent, grid: &mut Grid) {
     let mut completed = false;
     if let Some(task_wrapper) = &mut agent.active_task {
         match &mut task_wrapper.task {
@@ -55,52 +53,42 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
                 if path.is_empty() {
                     completed = true;
                 }
-                {
-                    let grid_lock = grid.lock();
-                    match grid_lock {
-                        Ok(mut grid) => {
-                            if !grid.is_occupied(next) {
-                                let x_dir = next.x as i32 - agent.position.x as i32;
-                                let y_dir = next.y as i32 - agent.position.y as i32;
-                                if x_dir < 0 {
-                                    agent.direction = Nx;
-                                }
-                                else if x_dir > 0 {
-                                    agent.direction = Px;
-                                }
-                                else if y_dir < 0 {
-                                    agent.direction = Ny;
-                                }
-                                else {
-                                    agent.direction = Py;
-                                }
-                                grid.move_cube(agent.position, next);
-                                agent.position = next;
-
-                            }
-                            else {
-                                if let Some(destination) = agent.destination {
-                                    if let Some(path) = find_path(agent.position, destination, &*grid) {
-                                        agent.tasks.insert(0, AgentTask::Move {
-                                            path: path,
-                                            destination: destination,
-                                        });
-                                    }
-                                }
-
-                                completed = true;
-                            }
-
-                        }
-                        Err(_) => {}
+                if !grid.is_occupied(next) {
+                    let x_dir = next.x as i32 - agent.position.x as i32;
+                    let y_dir = next.y as i32 - agent.position.y as i32;
+                    if x_dir < 0 {
+                        agent.direction = Nx;
                     }
+                    else if x_dir > 0 {
+                        agent.direction = Px;
+                    }
+                    else if y_dir < 0 {
+                        agent.direction = Ny;
+                    }
+                    else {
+                        agent.direction = Py;
+                    }
+                    grid.move_agent(agent.position, next);
+                    agent.position = next;
+
+                }
+                else {
+                    if let Some(destination) = agent.destination {
+                        if let Some(path) = find_path(agent.position, destination, &*grid) {
+                            agent.tasks.insert(0, AgentTask::Move {
+                                path: path,
+                                destination: destination,
+                            });
+                        }
+                    }
+
+                    completed = true;
                 }
             }
             AgentTask::FindPath { destination } => {
                 let start = agent.destination.or(Some(agent.position)).unwrap();
                 {
-                    let grid_lock = grid.lock();
-                    if let Some(path) = find_path(start, *destination, grid_lock.unwrap().deref()) {
+                    if let Some(path) = find_path(start, *destination, grid) {
                         agent.tasks.insert(0, AgentTask::Move {
                             path: path,
                             destination: destination.clone(),
@@ -112,27 +100,18 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
 
             }
             AgentTask::Plough { target } => {
-                if agent.position.z > 0 {
-                    if let Ok(mut grid) = grid.lock() {
-                        let cube = grid.get_cube_mut(*target);
-                        //grid[index].cube_type = Some(CubeType::Mud);
-                    }
-                }
+
 
                 completed = true;
             }
             AgentTask::Dig { target } => {
                 if agent.position.z > 0 {
-                    if let Ok(mut grid) = grid.lock() {
-                        grid.delete_cube(*target);
-                    }
+                    grid.delete_cube(*target);
                 }
                 completed = true;
             }
             AgentTask::Place { target, cube } => {
-                if let Ok(mut grid) = grid.lock() {
-                    grid.place_cube(*target, *cube);
-                }
+                grid.place_cube(*target, cube.clone());
                 completed = true;
             }
         }
@@ -144,127 +123,110 @@ fn advance_task(agent: &mut Agent, grid: Arc<Mutex<Grid>>) {
     }
 }
 
+fn run_agent_loop(game_tick: usize, grid: &mut Grid, agents: &mut Vec<Agent>, game_events_receiver: &Receiver<AgentEvent>, grid_events_receiver: &Receiver<GridChangeEvent>) {
+
+    for event in grid_events_receiver.try_iter() {
+        grid.handle_grid_change_event(event);
+    }
+    {
+        match game_events_receiver.try_recv() {
+            Ok(ev) => {
+                match ev {
+                    AgentAddTask { agent, task } => {
+                        println!("got task");
+                        agents[agent].tasks.push(task);
+                    },
+                    _ =>{}
+                }
+
+            },
+            Err(_) => {},
+        }
+        for mut agent in agents.iter_mut() {
+            agent.advance_animation_state();
+            if let Some(active_task) = &agent.active_task {
+                if game_tick < active_task.end_tick {
+                    continue;
+                }
+                advance_task(agent, grid);
+
+                if let Some(task) = &agent.active_task {
+                    if !task.completed {
+                        continue;
+                    }
+                    agent.active_task = None;
+                }
+            }
+
+            if agent.tasks.is_empty() {
+                agent.change_animation("idle");
+                continue;
+            }
+            let mut next_task = agent.tasks.remove(0);
+            let mut cancel_task = false;
+            if let Some(required_positions) = next_task.get_required_position() {
+                if !required_positions.contains(&agent.position) {
+                    println!("not in required pos");
+                    for pos in required_positions {
+                        {
+                            if let Some(path) = find_path(agent.position, pos, grid) {
+                                agent.tasks.insert(0, next_task.clone());
+                                next_task = AgentTask::Move {
+                                    destination: pos,
+                                    path: path,
+                                };
+                                cancel_task = false;
+                                break;
+                            }
+                        }
+                        cancel_task = true;
+                    }
+                }
+            }
+
+            let end_tick = match &next_task {
+                AgentTask::Plough {..} => {
+                    agent.change_animation("ploughing");
+                    game_tick + 15
+                },
+
+                AgentTask::Move { .. } => {
+                    agent.change_animation("running");
+                    game_tick + 1
+                }
+                AgentTask::FindPath { .. } => {
+                    game_tick
+                }
+                AgentTask::Dig { .. } => {
+                    agent.change_animation("mining");
+                    game_tick + 20
+                }
+                AgentTask::Place { .. } => {
+                    game_tick + 9
+                }
+            };
+            let task = AgentCoroutine {
+                task: next_task,
+                end_tick,
+                completed: false,
+            };
+            agent.active_task = if cancel_task { None } else { Some(task) };
+
+        }
+    }
+}
+
 fn main() {
     let sprites = load_cube_sprites();
 
     let (grid_events_sender, grid_events_receiver) = mpsc::channel();
 
     let mut grid = prepare_grid(grid_events_sender);
-    let agents = place_workers(&mut grid);
-
-    let grid = Arc::new(Mutex::new(grid));
-    let agents: Arc<Mutex<Vec<Agent>>> = Arc::new(Mutex::new(agents));
+    let mut agents = place_workers(&mut grid);
 
     let select_cube = Sprite::new("resources/24/select_cube.png");
 
     let (game_events, game_events_receiver) = mpsc::channel();
-    let agent_clone = Arc::clone(&agents);
-    let grid_clone = Arc::clone(&grid);
-    let mut game_tick: u32 = 0;
-    let agent_loop = thread::spawn(move || {
-        loop {
-
-            for event in grid_events_receiver.try_iter() {
-                {
-                    let mut grid_lock = grid_clone.lock().unwrap();
-                    grid_lock.handle_grid_change_event(&event);
-                }
-            }
-            {
-                //println!("game tick: {}", gate_tick);
-                let mut mut_agents =  agent_clone.lock().unwrap();
-                match game_events_receiver.try_recv() {
-                    Ok(ev) => {
-                        match ev {
-                            AgentAddTask { agent, task } => {
-                                println!("got task");
-                                mut_agents[agent].tasks.push(task);
-                            },
-                            _ =>{}
-                        }
-
-                    },
-                    Err(_) => {},
-                }
-                for mut agent in mut_agents.iter_mut() {
-                    agent.advance_animation_state();
-                    if let Some(active_task) = &agent.active_task {
-                        //println!("active task: {:?}", active_task.end_tick);
-                        if game_tick < active_task.end_tick {
-                            continue;
-                        }
-                        //println!("gate tick: {}", gate_tick);
-                        advance_task(agent, Arc::clone(&grid_clone));
-
-                        if let Some(task) = &agent.active_task {
-                            if !task.completed {
-                               continue;
-                            }
-                            agent.active_task = None;
-                        }
-                    }
-
-                    if agent.tasks.is_empty() {
-                        agent.change_animation("idle");
-                        continue;
-                    }
-                    let mut next_task = agent.tasks.remove(0);
-                    let mut cancel_task = false;
-                    if let Some(required_positions) = next_task.get_required_position() {
-                        if !required_positions.contains(&agent.position) {
-                            println!("not in required pos");
-                            for pos in required_positions {
-                                {
-                                    let grid_lock = grid_clone.lock();
-                                    if let Some(path) = find_path(agent.position, pos, grid_lock.unwrap().deref()) {
-                                        agent.tasks.insert(0, next_task.clone());
-                                        next_task = AgentTask::Move {
-                                            destination: pos,
-                                            path: path,
-                                        };
-                                        cancel_task = false;
-                                        break;
-                                    }
-                                }
-                                cancel_task = true;
-                            }
-                        }
-                    }
-
-                    let end_tick = match &next_task {
-                        AgentTask::Plough {..} => {
-                            agent.change_animation("ploughing");
-                            game_tick + 15
-                        },
-
-                        AgentTask::Move { .. } => {
-                            agent.change_animation("running");
-                            game_tick + 1
-                        }
-                        AgentTask::FindPath { .. } => {
-                            game_tick
-                        }
-                        AgentTask::Dig { .. } => {
-                            agent.change_animation("mining");
-                            game_tick + 20
-                        }
-                        AgentTask::Place { .. } => {
-                            game_tick + 9
-                        }
-                    };
-                    let task = AgentCoroutine {
-                        task: next_task,
-                        end_tick,
-                        completed: false,
-                    };
-                    agent.active_task = if cancel_task { None } else { Some(task) };
-
-                }
-            }
-            sleep(Duration::from_millis(200));
-            game_tick += 1;
-        }
-    });
 
     let mut window = Window::new(
         "Cubes",
@@ -288,10 +250,17 @@ fn main() {
         selected_agent: None
     };
 
-    let read_only_grid = Arc::clone(&grid);
-
-    let read_only_agents = Arc::clone(&agents);
+    let mut game_tick: usize = 0;
+    let mut elapsed_time = std::time::Instant::now();
     while window.is_open() && !window.is_key_down(Key::Escape) {
+
+        let current_time = std::time::Instant::now();
+        if current_time - elapsed_time > Duration::from_millis(200) {
+            run_agent_loop(game_tick, &mut grid, &mut agents, &game_events_receiver, &grid_events_receiver);
+            game_tick += 1;
+            elapsed_time = current_time;
+        }
+
         let scroll_input = window.get_scroll_wheel().map(|scroll| {
             scroll.1
         });
@@ -342,26 +311,21 @@ fn main() {
         }
 
         if let Some((sx, sy)) = window.get_mouse_pos(MouseMode::Clamp) {
-            selected_cube = select_cube_mouse(&camera, ScreenPos::new(sx as u32, sy as u32), &*grid.lock().unwrap(), WorldPos::new(view_x, view_y, view_z));
+            selected_cube = select_cube_mouse(&camera, ScreenPos::new(sx as u32, sy as u32), &grid, WorldPos::new(view_x, view_y, view_z));
         }
 
         if let Some(sel) = selected_cube {
             let selected_cube_world_pos = view_frame_local_to_valid_grid_pos(camera.compass, sel, view_window_origin);
             if let Some(actual_cube_pos) = selected_cube_world_pos {
                 if input_buffer.button_pressed(Key::Space) || input_buffer.left_mouse_pressed() {
-                    {
-                        let grid_lock = read_only_grid.lock().unwrap();
-                        let cube_data = grid_lock.get_cube(actual_cube_pos).unwrap();
-                        handle_selection(cube_data, &game_events, actual_cube_pos, &mut selection_state);
-                    }
+                    let cube_data = grid.get_cube(actual_cube_pos).unwrap();
+                    handle_selection(cube_data, &game_events, actual_cube_pos, &mut selection_state);
+
                 }
 
                 if input_buffer.button_pressed(Key::X) {
-                    {
-                        let mut grid_lock = read_only_grid.lock().unwrap();
-                        if let None = grid_lock.get_cube(actual_cube_pos).unwrap().agent {
-                            grid_lock.delete_cube(actual_cube_pos);
-                        }
+                    if let None = grid.get_cube(actual_cube_pos).unwrap().agent {
+                        grid.delete_cube(actual_cube_pos);
                     }
                 }
 
@@ -371,9 +335,8 @@ fn main() {
                     }
                     else {
                         if let Some(above) = actual_cube_pos.above() {
-                            let mut grid_lock = read_only_grid.lock().unwrap();
-                            if !grid_lock.is_occupied(above) {
-                                grid_lock.place_cube(above, Cube::new(CubeType::Stone));
+                            if !grid.is_occupied(above) {
+                                grid.place_cube(above, Cube::new(CubeType::Stone));
                             }
                         }
                     }
@@ -421,13 +384,12 @@ fn main() {
         let mut buffer = vec![0xFFFFFF; SCREEN_WIDTH * SCREEN_HEIGHT];
 
         {
-            let grid = read_only_grid.lock().unwrap();
             for z in 0..VIEW_HEIGHT {
                 for y in 0..VIEW_WIDTH {
                     for x in 0..VIEW_WIDTH {
 
                         let view_frame_local_pos = ViewFramePos::new(x as i32, y as i32, z as i32);
-                        let rel = view_frame_local_to_world(camera.compass, view_frame_local_pos);   // view-relative world
+                        let rel = view_frame_local_to_world(camera.compass, view_frame_local_pos);
                         let real_cube_pos = WorldPos::new(rel.x + view_x, rel.y + view_y, rel.z + view_z);
 
                         let (cube_screen_x, cube_screen_y) = get_screen_coord(view_frame_local_pos);
@@ -448,17 +410,13 @@ fn main() {
                         }
 
                         if let Some(agent) = cube_data.agent {
-                            let agents_copy = read_only_agents.lock().unwrap();
-                            let agent: &Agent = &agents_copy[agent as usize];
+                            let agent: &Agent = &agents[agent as usize];
                             let highlight_colour = selection_state.selected_agent
                                 .filter(|selected_agent| *selected_agent == agent.id as u8)
                                 .map_or((0,0,0), |_| (125, 0, 0));
                             draw_sprite((cube_screen_x, cube_screen_y), &agent.get_current_animation_frame(camera.compass), &mut buffer, highlight_colour);
                             continue;
                         }
-
-                        let cube_light = if night_mode { cube_data.light_level } else { Light::max_level() };
-
 
                         //TODO change this no handle new faces
                         let (visible_face_left, visible_face_right) = camera.visible_faces();
@@ -489,51 +447,36 @@ fn main() {
                             (bl, br, bt)
                         };
 
-                        if let Some(next_y) = blocking_left {
-                            if next_y.is_transparent() {
-                                let face = cube_data.cube_py_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
-                                draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
+                        for (blocking, visible, face) in [
+                            (blocking_left, visible_face_left, Face::Left),
+                            (blocking_right, visible_face_right, Face::Right),
+                            (blocking_top, CubeFace::Z, Face::Top),
+                        ].into_iter() {
+                            if let Some(block) = blocking {
+                                if !block.is_transparent() {
+                                    continue;
+                                }
                             }
-                        }
-                        else {
-                            let face = cube_data.cube_py_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
-                            draw_left_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level))
+                            let sprite = &sprites[cube_data.get_face_sprite_index(visible).unwrap() as usize];
+                            let light = blocking.and_then(|blocker| blocker.light_level.clone()).unwrap_or(Light::min_level());
+                            draw_face(face, (cube_screen_x, cube_screen_y), sprite, &mut buffer, light)
                         }
 
-
-                        if let Some(next_x) = blocking_right {
-                            if next_x.is_transparent() {
-                                let face = cube_data.cube_px_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
-                                draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
+                        if let Some(above) = blocking_top {
+                            if z == VIEW_HEIGHT - 1 && !above.is_transparent() {
+                                draw_face(Face::Top, (cube_screen_x, cube_screen_y), &sprites[CubeType::Blank as usize], &mut buffer, Light::min_level())
                             }
                         }
-                        else {
-                            let face = cube_data.cube_px_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
-                            draw_right_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level))
-                        }
 
-                        if let Some(next_z) = blocking_top {
-                            if next_z.is_transparent() {
-                                let face = cube_data.cube_z_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
-                                draw_top_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.z_level, cube_light.z_level, cube_light.z_level))
-                            }
-                            else if z == VIEW_HEIGHT - 1 {
-                                draw_top_face((cube_screen_x, cube_screen_y), &sprites[3], &mut buffer, (cube_light.z_level, cube_light.z_level, cube_light.z_level))
-                            }
-                        }
-                        else {
-                            let face = cube_data.cube_z_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
-                            draw_top_face((cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.z_level, cube_light.z_level, cube_light.z_level))
-                        }
-
+                        //TODO these need to do correct face
                         if x == terminal_x_layer {
                             let face = cube_data.cube_px_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
-                            draw_right_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.y_level, cube_light.y_level, cube_light.y_level));
+                            draw_face(Face::Right, (cube_screen_x, cube_screen_y), face, &mut buffer, Light::min_level());
                         }
 
                         if y == terminal_y_layer {
                             let face = cube_data.cube_py_face.map_or( find_sprite(&cube_data, &sprites).unwrap(), |x| { &sprites[x as usize] });
-                            draw_left_face( (cube_screen_x, cube_screen_y), face, &mut buffer, (cube_light.x_level, cube_light.x_level, cube_light.x_level));
+                            draw_face(Face::Left, (cube_screen_x, cube_screen_y), face, &mut buffer, Light::min_level());
                         }
 
                     }
@@ -600,7 +543,6 @@ fn get_screen_coord(world_space: ViewFramePos) -> (usize, usize) {
     )
 }
 
-//even though this returns a 'world pos' it is relative to the view window
 fn select_cube_mouse(camera: &Camera, screen_space: ScreenPos, grid: &Grid, view_frame_origin: WorldPos) -> Option<ViewFramePos> {
     let x = screen_space.x as f32;
     let y = screen_space.y as f32;

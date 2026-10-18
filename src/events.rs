@@ -11,6 +11,10 @@ pub enum GridChangeEvent {
         position: WorldPos,
         cube: Cube,
     },
+    MoveAgent {
+        from: WorldPos,
+        to: WorldPos,
+    }
 }
 
 impl EventQueue {

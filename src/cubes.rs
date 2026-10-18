@@ -1,7 +1,8 @@
 use crate::grid::{Light};
+use crate::render::CubeFace;
 use crate::resources::CubeType;
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct Cube {
     pub cube_type: Option<CubeType>,
     pub cube_px_face: Option<u8>,
@@ -10,7 +11,7 @@ pub struct Cube {
     pub cube_ny_face: Option<u8>,
     pub cube_z_face: Option<u8>,
     pub agent: Option<u8>,
-    pub light_level: Light,
+    pub light_level: Option<Light>,
     pub water_level: f32
 }
 
@@ -24,7 +25,7 @@ impl Cube {
             cube_nx_face: None,
             cube_z_face: None,
             agent: None,
-            light_level: Light::min_level(),
+            light_level: None,
             water_level: 0.0
         }
     }
@@ -38,9 +39,22 @@ impl Cube {
             cube_nx_face: None,
             cube_z_face: None,
             agent: None,
-            light_level: Light::min_level(),
+            light_level: Some(Light::min_level()),
             water_level: 0.0
         }
+    }
+
+    pub fn get_face_sprite_index(&self, visible_face: CubeFace) -> Option<u8> {
+        if let Some(cube_type) = self.cube_type {
+            return match visible_face {
+                CubeFace::pX => Some(self.cube_px_face.unwrap_or(cube_type as u8)),
+                CubeFace::pY => Some(self.cube_py_face.unwrap_or(cube_type as u8)),
+                CubeFace::nX => Some(self.cube_nx_face.unwrap_or(cube_type as u8)),
+                CubeFace::nY => Some(self.cube_ny_face.unwrap_or(cube_type as u8)),
+                CubeFace::Z => Some(self.cube_z_face.unwrap_or(cube_type as u8)),
+            }
+        }
+        None
     }
 
     pub fn is_walkable(&self) -> bool {
@@ -60,7 +74,7 @@ impl Cube {
             cube_nx_face: None,
             cube_z_face: None,
             agent: Some(agent),
-            light_level: Light::min_level(),
+            light_level: None,
             water_level: 0.0
         }
     }

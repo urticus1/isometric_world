@@ -234,7 +234,7 @@ impl Agent {
 }
 
 pub struct AgentCoroutine {
-    pub end_tick: u32,
+    pub end_tick: usize,
     pub task: AgentTask,
     pub completed: bool,
 }
