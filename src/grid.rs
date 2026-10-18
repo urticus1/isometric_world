@@ -45,7 +45,7 @@ impl Grid {
     }
 
     pub fn is_valid_worldpos(&self, pos: &WorldPos) -> bool {
-        pos.x >= 0 && pos.x <= GRID_WIDTH - 1 && pos.y >= 0 && pos.y <= GRID_WIDTH - 1 && pos.z >= 0 && pos.z <= GRID_HEIGHT - 1
+        pos.x <= GRID_WIDTH - 1 && pos.y <= GRID_WIDTH - 1 && pos.z <= GRID_HEIGHT - 1
     }
 
 

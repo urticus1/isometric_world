@@ -10,7 +10,7 @@ const TOP_FACE_PIXELS: [(usize, usize); 144] = [(10, 0), (11, 0), (12, 0), (13, 
 const ALPHA_MASK: u32 = (0b11111111u8 as u32) << 24;
 const RED_MASK: u32 = (0b11111111u8 as u32) << 16;
 const GREEN_MASK: u32 = (0b11111111u8 as u32) << 8;
-const BLUE_MASK: u32 = (0b11111111u8 as u32);
+const BLUE_MASK: u32 = 0b11111111u8 as u32;
 
 
 pub struct Sprite {
@@ -41,9 +41,9 @@ pub fn light_flood_fill(start: WorldPos, light_level: u8, grid: &mut Grid) {
     let mut light_level = light_level;
     while !queue.is_empty() && light_level > 0 {
         let layer_size = queue.len();
-        for i in 0..layer_size {
+        for _ in 0..layer_size {
             let current = queue.pop_front().unwrap();
-            let mut cube = grid.get_cube_mut(current);
+            let cube = grid.get_cube_mut(current);
 
             if let Some(cube_light) = cube.light_level {
                 cube.light_level = Some(cube_light + Light::from_level(light_level));
@@ -71,9 +71,9 @@ pub fn remove_light(start: WorldPos, light_level: u8, grid: &mut Grid) {
     let mut light_level = light_level;
     while !queue.is_empty() && light_level > 0 {
         let layer_size = queue.len();
-        for i in 0..layer_size {
+        for _ in 0..layer_size {
             let current = queue.pop_front().unwrap();
-            let mut cube = grid.get_cube_mut(current);
+            let cube = grid.get_cube_mut(current);
 
             if !cube.is_transparent() {
                 continue;
@@ -118,7 +118,7 @@ pub fn draw_face(face: Face, screen_pos: (usize, usize), sprite: &Sprite, buffer
 
         let val = 0u32 | r << 16 | g << 8 | b;
 
-        if (pixel < buffer.len()) {
+        if pixel < buffer.len() {
             buffer[pixel] = val
         }
     }
@@ -131,10 +131,10 @@ pub enum Face {
 }
 
 pub enum CubeFace {
-    pX,
-    pY,
-    nX,
-    nY,
+    PosX,
+    PosY,
+    NegX,
+    NegY,
     Z
 }
 
@@ -160,7 +160,7 @@ pub fn draw_sprite(screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec
 
             let val = 0u32 | r << 16 | g << 8 | b;
             let pixel = (screen_pos.0 + SCREEN_WIDTH * screen_pos.1) + x + y * SCREEN_WIDTH;
-            if (pixel < buffer.len()) {
+            if pixel < buffer.len() {
                 buffer[pixel] = val
             }
         }

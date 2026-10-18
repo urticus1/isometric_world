@@ -10,14 +10,11 @@ mod camera;
 mod cubes;
 
 use std::cmp::PartialEq;
-use std::ops::{Add, Deref, Sub};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
-use std::thread;
-use std::thread::sleep;
 use std::time::Duration;
 use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
-use noise::{NoiseFn};
+
 use crate::agents::{find_path, Agent, AgentCoroutine, AgentEvent, AgentTask};
 use crate::agents::AgentEvent::AgentAddTask;
 use crate::agents::Direction::{Nx, Ny, Px, Py};
@@ -99,7 +96,7 @@ fn advance_task(agent: &mut Agent, grid: &mut Grid) {
                 }
 
             }
-            AgentTask::Plough { target } => {
+            AgentTask::Plough { .. } => {
 
 
                 completed = true;
@@ -136,13 +133,12 @@ fn run_agent_loop(game_tick: usize, grid: &mut Grid, agents: &mut Vec<Agent>, ga
                         println!("got task");
                         agents[agent].tasks.push(task);
                     },
-                    _ =>{}
                 }
 
             },
             Err(_) => {},
         }
-        for mut agent in agents.iter_mut() {
+        for agent in agents.iter_mut() {
             agent.advance_animation_state();
             if let Some(active_task) = &agent.active_task {
                 if game_tick < active_task.end_tick {
@@ -591,7 +587,7 @@ fn select_cube_mouse(camera: &Camera, screen_space: ScreenPos, grid: &Grid, view
                 Side::Left => ViewFramePos::new(x - 1, y, z),
                 Side::Right => ViewFramePos::new(x, y - 1, z),
             },
-            ViewFramePos::new((hit_in_layer.x - 1), (hit_in_layer.y - 1), hit_in_layer.z)
+            ViewFramePos::new(hit_in_layer.x - 1, hit_in_layer.y - 1, hit_in_layer.z)
         ];
 
         for view_local in cubes_to_check_in_layer.into_iter() {

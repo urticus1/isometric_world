@@ -1,9 +1,7 @@
-use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
 use crate::{Compass, Sprite};
 use crate::animation::{Animation, AnimationPool};
 use crate::cubes::Cube;
@@ -125,7 +123,7 @@ fn get_walkable_neighbours(position: WorldPos, grid: &Grid) -> Vec<WorldPos> {
         .into_iter()
         .flatten()
         .map(|pos| (pos, grid.get_cube(pos).unwrap()))
-        .filter(|(pos, cube)| cube.agent.is_none())
+        .filter(|(_, cube)| cube.agent.is_none())
         .flat_map(|(pos, cube)| {
             match cube.cube_type {
                 Some(_) => {

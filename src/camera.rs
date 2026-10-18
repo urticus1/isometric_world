@@ -19,10 +19,10 @@ impl Camera {
 
     pub fn visible_faces(&self) -> (CubeFace, CubeFace) {
         match self.compass {
-            Compass::North => (CubeFace::pY, CubeFace::pX),
-            Compass::East => (CubeFace::pX, CubeFace::nY),
-            Compass::South =>  (CubeFace::nY, CubeFace::nX),
-            Compass::West => (CubeFace::nX, CubeFace::pY)
+            Compass::North => (CubeFace::PosY, CubeFace::PosX),
+            Compass::East => (CubeFace::PosX, CubeFace::NegY),
+            Compass::South =>  (CubeFace::NegY, CubeFace::NegX),
+            Compass::West => (CubeFace::NegX, CubeFace::PosY)
         }
     }
 

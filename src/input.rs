@@ -1,6 +1,6 @@
 use std::cmp::PartialEq;
 use std::collections::HashMap;
-use minifb::{Key, MouseButton};
+use minifb::Key;
 use crate::input::ButtonState::{Held, Pressed, Released};
 
 pub struct InputBuffer {

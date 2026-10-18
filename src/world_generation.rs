@@ -35,10 +35,10 @@ pub fn prepare_grid(events: Sender<GridChangeEvent>) -> Grid {
         z_scale: 0.07,
     };
     let ground_level = GRID_HEIGHT - 20;
-    let frequency_x: f32 = 0.2;
-    let variance_x = 5.0;
-    let frequency_y = 0.1;
-    let variance_y = 6.0;
+    let _frequency_x: f32 = 0.2;
+    let _variance_x = 5.0;
+    let _frequency_y = 0.1;
+    let _variance_y = 6.0;
     let sea_level = ground_level - 20;
 
 

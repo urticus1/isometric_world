@@ -47,10 +47,10 @@ impl Cube {
     pub fn get_face_sprite_index(&self, visible_face: CubeFace) -> Option<u8> {
         if let Some(cube_type) = self.cube_type {
             return match visible_face {
-                CubeFace::pX => Some(self.cube_px_face.unwrap_or(cube_type as u8)),
-                CubeFace::pY => Some(self.cube_py_face.unwrap_or(cube_type as u8)),
-                CubeFace::nX => Some(self.cube_nx_face.unwrap_or(cube_type as u8)),
-                CubeFace::nY => Some(self.cube_ny_face.unwrap_or(cube_type as u8)),
+                CubeFace::PosX => Some(self.cube_px_face.unwrap_or(cube_type as u8)),
+                CubeFace::PosY => Some(self.cube_py_face.unwrap_or(cube_type as u8)),
+                CubeFace::NegX => Some(self.cube_nx_face.unwrap_or(cube_type as u8)),
+                CubeFace::NegY => Some(self.cube_ny_face.unwrap_or(cube_type as u8)),
                 CubeFace::Z => Some(self.cube_z_face.unwrap_or(cube_type as u8)),
             }
         }
