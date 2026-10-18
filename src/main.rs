@@ -347,8 +347,7 @@ fn main() {
 
         if let Some(sel) = selected_cube {
             let selected_cube_world_pos = view_frame_local_to_valid_grid_pos(camera.compass, sel, view_window_origin);
-            if let Some(rel) = selected_cube_world_pos {
-                let actual_cube_pos = rel + view_window_origin;
+            if let Some(actual_cube_pos) = selected_cube_world_pos {
                 if input_buffer.button_pressed(Key::Space) || input_buffer.left_mouse_pressed() {
                     {
                         let grid_lock = read_only_grid.lock().unwrap();
