@@ -3,11 +3,10 @@ use std::collections::{VecDeque};
 use std::ops;
 use std::ops::{Add, Index, IndexMut, Sub};
 use std::sync::mpsc::Sender;
-use minifb::Key::G;
 use crate::{Agent, GRID_HEIGHT, GRID_WIDTH};
 use crate::cubes::Cube;
 use crate::events::{GridChangeEvent};
-use crate::render::{light_flood_fill, CubeFace};
+use crate::render::{light_flood_fill, remove_light};
 use crate::resources::CubeType;
 
 pub struct Grid {
@@ -22,7 +21,11 @@ impl Grid {
 
     pub fn handle_grid_change_event(&mut self, event: &GridChangeEvent) {
         match event {
-            GridChangeEvent::Delete(pos) => {
+            GridChangeEvent::Delete{position, cube} => {
+
+                if cube.cube_type.is_some() && cube.cube_type.unwrap() == CubeType::Lantern {
+                    remove_light(*position, 10, self);
+                }
 
             }
         }
@@ -42,54 +45,11 @@ impl Grid {
         pos.x >= 0 && pos.x <= GRID_WIDTH - 1 && pos.y >= 0 && pos.y <= GRID_WIDTH - 1 && pos.z >= 0 && pos.z <= GRID_HEIGHT - 1
     }
 
-    pub fn get_blocking_cube(&self, face: &CubeFace, i: usize) -> Option<Cube> {
-        match face {
-            CubeFace::nY => {
-                if (i % (self.width * self.width)) / self.width == 0 {
-                    return None
-                }
-                Some(self.grid[i - self.width])
-            },
-            CubeFace::nX => {
-                if i % self.width == 0 {
-                    return None
-                }
-                Some(self.grid[i - 1])
-            },
-            CubeFace::pX => {
-                if i % self.width == GRID_WIDTH - 1 {
-                    return None
-                }
-                Some(self.grid[i + 1])
-            },
-            CubeFace::pY => {
-                if (i % (self.width * self.width)) / self.width == self.width - 1 {
-                    return None
-                }
-                Some(self.grid[i + self.width])
-            },
-            CubeFace::Z => {
-                let val = i + self.width * self.width;
-                if val >= self.height * self.width * self.width {
-                    return None;
-                }
-                Some(self.grid[i + self.width * self.width])
-            }
-        }
-    }
 
-    pub fn get_cube_above(&self, i: usize) -> Option<Cube> {
-        let val = i + self.width * self.width;
-        if val >= self.height * self.width * self.width {
-            return None;
-        }
-        Some(self.grid[i + self.width * self.width])
-    }
-
-    pub fn get_vector_pos(&self, world_space: WorldPos) -> Result<usize, GridError> {
+    fn get_vector_pos(&self, world_space: WorldPos) -> Result<usize, ()> {
         let index = world_space.x + world_space.y * self.width + world_space.z * self.width * self.width;
         if index >= self.grid.len() {
-            return Err(GridError::new(format!("Index out of bounds: {}", index)));
+            return Err(());
         };
         Ok(index)
     }
@@ -107,8 +67,12 @@ impl Grid {
 
     pub fn delete_cube(&mut self, pos: WorldPos) {
         let index = self.get_vector_pos(pos).unwrap();
+        let deleted = self.grid[index].clone();
         self.grid[index] = Cube::empty();
-        self.events.send(GridChangeEvent::Delete(pos));
+        self.events.send(GridChangeEvent::Delete {
+            position: pos,
+            cube: deleted
+        });
     }
 
     pub fn place_cube(&mut self, pos: WorldPos, cube: Cube) {
@@ -124,7 +88,7 @@ impl Grid {
         self.grid[index] = Cube::with_agent(agent.id as u8);
     }
 
-    pub fn get_cube(&self, pos: WorldPos) -> Result<&Cube, GridError> {
+    pub fn get_cube(&self, pos: WorldPos) -> Result<&Cube, ()> {
         Ok(&self.grid[self.get_vector_pos(pos)?])
     }
 

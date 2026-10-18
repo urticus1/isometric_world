@@ -124,13 +124,13 @@ fn get_walkable_neighbours(position: WorldPos, grid: &Grid) -> Vec<WorldPos> {
     [position.next_x(), position.prev_x(), position.next_y(), position.prev_y()]
         .into_iter()
         .flatten()
-        .map(|pos| (pos, grid[grid.get_vector_pos(pos).unwrap()]))
+        .map(|pos| (pos, grid.get_cube(pos).unwrap()))
         .filter(|(pos, cube)| cube.agent.is_none())
         .flat_map(|(pos, cube)| {
             match cube.cube_type {
                 Some(_) => {
                     if let Some(above) = pos.above() {
-                        let cube_above = grid[grid.get_vector_pos(above).unwrap()];
+                        let cube_above = grid.get_cube(above).unwrap();
                         if cube.is_walkable() && cube_above.cube_type.is_none() && cube_above.agent.is_none() {
                             return Some(above);
                         }
@@ -140,12 +140,12 @@ fn get_walkable_neighbours(position: WorldPos, grid: &Grid) -> Vec<WorldPos> {
                 None => {
                     let below = pos.below();
                     if let Some(below) = below {
-                        let cube_below = grid[grid.get_vector_pos(below).unwrap()];
+                        let cube_below = grid.get_cube(below).unwrap();
                         if cube_below.is_walkable() {
                             return Some(pos);
                         }
                         else if let Some(below_below) = below.below() {
-                            let cube_below_below = grid[grid.get_vector_pos(below_below).unwrap()];
+                            let cube_below_below = grid.get_cube(below_below).unwrap();
                             if cube_below_below.is_walkable() && cube_below.agent.is_none() {
                                 return Some(below);
                             }

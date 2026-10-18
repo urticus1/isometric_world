@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use crate::cubes::Cube;
 use crate::grid::WorldPos;
 
 pub struct EventQueue {
@@ -6,7 +7,10 @@ pub struct EventQueue {
 }
 
 pub enum GridChangeEvent {
-    Delete(WorldPos),
+    Delete {
+        position: WorldPos,
+        cube: Cube,
+    },
 }
 
 impl EventQueue {

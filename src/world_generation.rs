@@ -49,24 +49,25 @@ pub fn prepare_grid(events: Sender<GridChangeEvent>) -> Grid {
                 let cut_off= ground_level as f32 + val;
                 let cut_off = cut_off as usize;
                 let coord = WorldPos::new(x,y,z);
-                let index = grid.get_vector_pos(coord).unwrap();
+                let cube = grid.get_cube_mut(coord);
                 if z > cut_off {
                     if z > sea_level {
-                        grid[index] = Cube::empty();
+                        *cube = Cube::empty();
                     }
                     else {
-                        grid[index] = Cube::empty();
-                        grid[index].water_level = 100.0;
+                        let mut water = Cube::empty();
+                        water.water_level = 100.0;
+                        *cube = water;
                     }
                 }
                 else if z == cut_off {
-                    grid[index] = Cube::new(CubeType::Grass);
+                    *cube = Cube::new(CubeType::Grass);
                 }
                 else if z < cut_off && z > cut_off - 5 {
-                    grid[index] = Cube::new(CubeType::Mud);
+                    *cube = Cube::new(CubeType::Mud);
                 }
                 else {
-                    grid[index] = Cube::new(CubeType::Stone);
+                    *cube = Cube::new(CubeType::Stone);
                 }
             }
 
@@ -80,8 +81,8 @@ pub fn prepare_grid(events: Sender<GridChangeEvent>) -> Grid {
             for j in 0..GRID_WIDTH {
                 for k in 0..GRID_HEIGHT {
                     if (i as i32 - epicentre.0 as i32).pow(2) + (j as i32 - epicentre.1 as i32).pow(2) + (k as i32 - epicentre.2 as i32).pow(2) < size {
-                        let index = grid.get_vector_pos(WorldPos::new(i,j,k)).unwrap();
-                        grid[index] = Cube::empty();
+                        let cube = grid.get_cube_mut(WorldPos::new(i,j,k));
+                        *cube = Cube::empty();
                     }
                 }
             }

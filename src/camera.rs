@@ -27,39 +27,4 @@ impl Camera {
         }
     }
 
-    pub fn get_obscuring_cube_left(&self, cube: WorldPos) -> Option<WorldPos> {
-        match self.compass {
-            Compass::North => cube.next_y(),
-            Compass::East => cube.next_x(),
-            Compass::South => cube.prev_y(),
-            Compass::West => cube.prev_x()
-        }
-    }
-
-    pub fn get_obscuring_cube_right(&self, cube: WorldPos) -> Option<WorldPos> {
-        match self.compass {
-            Compass::North => cube.next_x(),
-            Compass::East => cube.prev_y(),
-            Compass::South => cube.prev_x(),
-            Compass::West => cube.next_y()
-        }
-    }
-
-    pub fn get_blocked_cube_left(&self, cube: WorldPos) -> Option<WorldPos> {
-        match self.compass {
-            Compass::North => cube.prev_x(),
-            Compass::East => cube.prev_x(),
-            Compass::South => cube.next_y(),
-            Compass::West => cube.next_x()
-        }
-    }
-
-    pub fn get_blocked_cube_right(&self, cube: WorldPos) -> Option<WorldPos> {
-        match self.compass {
-            Compass::North => cube.prev_y(),
-            Compass::East => cube.prev_y(),
-            Compass::South => cube.next_x(),
-            Compass::West => cube.prev_y()
-        }
-    }
 }

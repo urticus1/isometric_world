@@ -61,6 +61,34 @@ pub fn light_flood_fill(start: WorldPos, light_level: u8, grid: &mut Grid) {
     }
 }
 
+pub fn remove_light(start: WorldPos, light_level: u8, grid: &mut Grid) {
+    let mut queue = VecDeque::new();
+    let mut seen = HashSet::new();
+    queue.push_back(start);
+    seen.insert(start);
+
+    let mut light_level = light_level;
+    while !queue.is_empty() && light_level > 0 {
+        let layer_size = queue.len();
+        for i in 0..layer_size {
+            let current = queue.pop_front().unwrap();
+            let mut cube = grid.get_cube_mut(current);
+            cube.light_level = Light::min_level();
+
+            if !cube.is_transparent() {
+                continue;
+            }
+            for neighbour in current.face_neighbours() {
+                if !seen.contains(&neighbour) {
+                    seen.insert(neighbour);
+                    queue.push_back(neighbour);
+                }
+            }
+        }
+        light_level -= 1;
+    }
+}
+
 fn draw_face(face: Face, screen_pos: (usize, usize), sprite: &Sprite, buffer: &mut Vec<u32>, light: (u8, u8, u8)) {
     let pixels = match face {
         Face::TOP => TOP_FACE_PIXELS.iter(),
