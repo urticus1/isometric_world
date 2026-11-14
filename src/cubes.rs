@@ -1,4 +1,4 @@
-use crate::grid::{Light};
+use crate::light::{LightLevel};
 use crate::render::CubeFace;
 use crate::resources::CubeType;
 
@@ -11,8 +11,7 @@ pub struct Cube {
     pub cube_ny_face: Option<u8>,
     pub cube_z_face: Option<u8>,
     pub agent: Option<u8>,
-    pub light_level: Option<Light>,
-    pub water_level: f32
+    pub light_level: Option<LightLevel>,
 }
 
 impl Cube {
@@ -26,7 +25,19 @@ impl Cube {
             cube_z_face: None,
             agent: None,
             light_level: None,
-            water_level: 0.0
+        }
+    }
+
+    pub fn light_source(cube_type: CubeType, light_level: LightLevel) -> Self {
+        Cube {
+            cube_type: Some(cube_type),
+            cube_py_face: None,
+            cube_ny_face: None,
+            cube_px_face: None,
+            cube_nx_face: None,
+            cube_z_face: None,
+            agent: None,
+            light_level: Some(light_level),
         }
     }
 
@@ -39,8 +50,7 @@ impl Cube {
             cube_nx_face: None,
             cube_z_face: None,
             agent: None,
-            light_level: Some(Light::min_level()),
-            water_level: 0.0
+            light_level: Some(LightLevel::min_level()),
         }
     }
 
@@ -75,7 +85,6 @@ impl Cube {
             cube_z_face: None,
             agent: Some(agent),
             light_level: None,
-            water_level: 0.0
         }
     }
 }

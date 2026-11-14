@@ -1,7 +1,6 @@
-use std::path::Path;
 use std::sync::{Arc};
 use std::sync::mpsc::Sender;
-use image::{open, RgbaImage};
+use image::{RgbaImage};
 use rand::random_range;
 use crate::events::GridChangeEvent;
 use crate::grid::{Grid, WorldPos};
@@ -23,23 +22,21 @@ impl PerlinNoise {
         let x = x % width as usize;
         let y = y % height as usize;
         let val = self.pixels.get_pixel(x as u32, y as u32);
-        val.0[0] as f32 * self.z_scale
+        (50.0 - val.0[0] as f32) * self.z_scale
     }
 }
 
 pub fn prepare_grid(events: Sender<GridChangeEvent>) -> Grid {
     let mut grid = Grid::new(GRID_WIDTH, GRID_HEIGHT, events);
 
+    let noise = include_bytes!("../resources/perlin_greyscale.png");
+    let noise = image::load_from_memory(noise).expect("Error loading image").into_rgba8();
     let perlin = PerlinNoise {
-        pixels: open(Path::new("resources/perlin_greyscale.png")).unwrap().into_rgba8(),
-        z_scale: 0.07,
+        pixels: noise,
+        z_scale: 0.06,
     };
     let ground_level = GRID_HEIGHT - 20;
-    let _frequency_x: f32 = 0.2;
-    let _variance_x = 5.0;
-    let _frequency_y = 0.1;
-    let _variance_y = 6.0;
-    let sea_level = ground_level - 20;
+    let sea_level = ground_level - 10;
 
 
     for x in 0..GRID_WIDTH {
@@ -55,9 +52,8 @@ pub fn prepare_grid(events: Sender<GridChangeEvent>) -> Grid {
                         *cube = Cube::empty();
                     }
                     else {
-                        let mut water = Cube::empty();
-                        water.water_level = 100.0;
-                        *cube = water;
+                        *cube = Cube::empty();
+                        //*cube =  Cube::new(CubeType::Water)
                     }
                 }
                 else if z == cut_off {

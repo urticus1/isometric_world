@@ -1,5 +1,10 @@
 use crate::{Compass};
-use crate::render::CubeFace;
+use crate::light::{AmbientLight, Colour};
+use crate::render::{CubeFace, Face};
+
+const TOP_FACE_AMBIENT_LIGHT: Colour = Colour { r: 250 , g: 250 , b: 250 };
+const LEFT_FACE_AMBIENT_LIGHT: Colour = Colour { r: 220 , g: 220 , b: 220 };
+const RIGHT_FACE_AMBIENT_LIGHT: Colour = Colour { r: 200 , g: 200 , b: 200 };
 
 pub struct Camera {
     pub compass: Compass
@@ -26,4 +31,11 @@ impl Camera {
         }
     }
 
+    pub fn get_ambient_light(&self) -> AmbientLight {
+        AmbientLight {
+            left_colour: LEFT_FACE_AMBIENT_LIGHT,
+            right_colour: RIGHT_FACE_AMBIENT_LIGHT,
+            top_colour: TOP_FACE_AMBIENT_LIGHT,
+        }
+    }
 }
