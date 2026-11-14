@@ -1,107 +1,88 @@
-use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
-use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
-use crate::{Compass, Sprite, EMPTY_CUBE, GRID_HEIGHT, GRID_WIDTH};
+use std::sync::mpsc::Receiver;
+use crate::{Compass, Sprite};
+use crate::agents::AgentEvent::AgentAddTask;
+use crate::agents::Direction::{Nx, Ny, Px, Py};
 use crate::animation::{Animation, AnimationPool};
-use crate::grid::{find_horizontal_neighbours, Cube, Grid};
+use crate::cubes::Cube;
+use crate::events::GridChangeEvent;
+use crate::grid::{Grid, WorldPos};
 
-pub fn find_path(start: (usize, usize, usize), end: (usize, usize, usize), grid: &Grid) -> Option<Vec<(usize, usize, usize)>> {
-    println!("{:?} -> {:?}", start, end);
-    let mut closed: HashMap<(usize, usize, usize), Rc<Node>> = HashMap::new();
-    let mut nodes: HashMap<(usize, usize, usize), Rc<Node>> = HashMap::new();
+pub fn find_path(start: WorldPos, end: WorldPos, grid: &Grid) -> Option<Vec<WorldPos>> {
+    let mut g_scores: HashMap<WorldPos, f32> = HashMap::new();
+    let mut came_from: HashMap<WorldPos, WorldPos> = HashMap::new();
+    g_scores.insert(start, 0.0);
 
-    let start = Rc::new(Node {
-        h: 0,
-        f: 0,
-        g: 0,
-        parent: None,
+    let start = Node {
+        f: distance(start, end),
+        g: 0.0,
         position: start
-    });
-
-    let mut open: BinaryHeap<Rc<Node>> = BinaryHeap::new();
+    };
+    let mut open: BinaryHeap<Node> = BinaryHeap::new();
     open.push(start);
 
     while !open.is_empty() {
         let current = open.pop().unwrap();
-        //path.push(current.position);
-        for neighbour in get_neighbours(current.position, grid) {
-            if closed.contains_key(&neighbour) {
-                continue;
-            }
-            let g = current.g + 1;
-            let h = distance(neighbour, end);
-            let f = h + g;
-            if !nodes.contains_key(&neighbour) {
-                let node = Rc::from(Node {
-                    h: distance(neighbour, end),
-                    f: distance(neighbour, end) + current.g + 1,
-                    g: current.g + 1,
-                    parent: Some(Rc::clone(&current)),
-                    position: neighbour
-                });
-                open.push(Rc::clone(&node));
-                nodes.insert(neighbour, Rc::clone(&node));
-            }
-            else {
-                let node = nodes.get_mut(&neighbour).unwrap();
-                if f < node.f {
-                    let node = Rc::from(Node {
-                        h: distance(neighbour, end),
-                        f: distance(neighbour, end) + current.g + 1,
-                        g: current.g + 1,
-                        parent: Some(Rc::clone(&current)),
-                        position: neighbour
-                    });
-                    open.push(Rc::clone(&node));
+
+        if current.position == end {
+            return Some(reconstruct_path(current.position, &came_from));
+        }
+
+        for neighbour in get_walkable_neighbours(current.position, grid) {
+            let tentative_g = current.g + 1.0;
+            if let Some(visited) = g_scores.get(&neighbour) {
+                if *visited <= tentative_g {
+                    continue;
                 }
             }
-            if neighbour == end {
-                return Some(reconstruct_path(Rc::clone(&nodes[&end])));
-            }
+            let node = Node {
+                f: tentative_g + distance(neighbour, end),
+                g: tentative_g,
+                position: neighbour,
+            };
+            open.push(node);
+            g_scores.insert(neighbour, tentative_g);
+            came_from.insert(neighbour, current.position);
         }
-        closed.insert(current.position, current);
-
     }
-
     println!("no path found");
     None
+
 }
 
-fn reconstruct_path(end: Rc<Node>) -> Vec<(usize, usize, usize)> {
+/**
+*   return reversed path
+*/
+fn reconstruct_path(end: WorldPos, parents: &HashMap<WorldPos, WorldPos>) -> Vec<WorldPos> {
     let mut path = Vec::new();
-    let mut current = Some(end);
-
-    while let Some(node) = current {
-        path.push(node.position);
-        current = node.parent.clone();
+    let mut current = end;
+    path.push(current.clone());
+    while let Some(node) = parents.get(&current) {
+        path.push(node.clone());
+        current = *node;
     }
     path.remove(path.len() - 1);
     path
 }
 
-fn distance(start: (usize, usize, usize), end: (usize, usize, usize)) -> u32 {
-    let x = (end.0 as i32 - start.0 as i32 ).pow(2) as u32;
-    let y = (end.1 as i32 - start.1 as i32 ).pow(2) as u32;
-    let z = (end.2 as i32 - start.2 as i32 ).pow(2) as u32;
-    x + y + z
+fn distance(start: WorldPos, end: WorldPos) -> f32 {
+    let x = (end.x as i32 - start.x as i32 ).pow(2) as f32;
+    let y = (end.y as i32 - start.y as i32 ).pow(2) as f32;
+    let z = (end.z as i32 - start.z as i32 ).pow(2) as f32;
+    (x + y + z).sqrt()
 }
 
-#[derive(Eq, PartialEq, Clone)]
 struct Node {
-    h: u32,
-    f: u32,
-    g: u32,
-    parent: Option<Rc<Node>>,
-    position: (usize, usize, usize)
+    f: f32,
+    g: f32,
+    position: WorldPos
 }
 
 impl Ord for Node {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.f.cmp(&self.f)
-            .then_with(|| other.h.cmp(&self.h))
+        other.f.total_cmp(&self.f)
     }
 }
 
@@ -111,36 +92,221 @@ impl PartialOrd for Node {
     }
 }
 
-fn get_neighbours(position: (usize, usize, usize), grid: &Grid) -> Vec<(usize, usize, usize)> {
-    let mut neighbours: Vec<(usize, usize, usize)> = Vec::new();
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        self.f == other.f && self.g == other.g && self.position == other.position
+    }
+}
 
-    for dir in [(-1 as i32, 0 as i32), (1, 0), (0, -1), (0, 1)].iter() {
-        let next = (position.0 as i32 + dir.0, position.1 as i32 + dir.1, position.2);
-        if next.0 < 0 || next.0 > GRID_WIDTH as i32 - 1 || next.1 < 0 || next.1 > GRID_WIDTH as i32 - 1 {
-            continue;
-        }
-        let next = (next.0 as usize, next.1 as usize, next.2 as usize);
-        let next_cube = grid[grid.get_vector_pos(next).unwrap()];
-        if next_cube.cube_type == EMPTY_CUBE && next_cube.agent.is_none() {
-            if grid[grid.get_vector_pos((next.0, next.1, next.2 - 1)).unwrap()].is_walkable() {
-                neighbours.push(next);
+impl Eq for Node {}
+
+fn get_walkable_neighbours(position: WorldPos, grid: &Grid) -> Vec<WorldPos> {
+    [position.next_x(), position.prev_x(), position.next_y(), position.prev_y()]
+        .into_iter()
+        .flatten()
+        .map(|pos| (pos, grid.get_cube(pos).unwrap()))
+        .filter(|(_, cube)| cube.agent.is_none())
+        .flat_map(|(pos, cube)| {
+            match cube.cube_type {
+                Some(_) => {
+                    if let Some(above) = pos.above() {
+                        let cube_above = grid.get_cube(above).unwrap();
+                        if cube.is_walkable() && cube_above.cube_type.is_none() && cube_above.agent.is_none() {
+                            return Some(above);
+                        }
+                    }
+
+                },
+                None => {
+                    let below = pos.below();
+                    if let Some(below) = below {
+                        let cube_below = grid.get_cube(below).unwrap();
+                        if cube_below.is_walkable() {
+                            return Some(pos);
+                        }
+                        else if let Some(below_below) = below.below() {
+                            let cube_below_below = grid.get_cube(below_below).unwrap();
+                            if cube_below_below.is_walkable() && cube_below.agent.is_none() {
+                                return Some(below);
+                            }
+                        }
+                    }
+                }
             }
-            else if
-                position.2 >= 2
-                && grid[grid.get_vector_pos((next.0, next.1, next.2 - 1)).unwrap()].cube_type == EMPTY_CUBE
-                && grid[grid.get_vector_pos((next.0, next.1, next.2 - 1)).unwrap()].agent.is_none()
-                && grid[grid.get_vector_pos((next.0, next.1, next.2 - 2)).unwrap()].is_walkable() {
-                    neighbours.push((next.0, next.1, next.2 - 1));
+            None
+        })
+        .collect()
+}
+
+pub fn advance_task(agent: &mut Agent, grid: &mut Grid) {
+    let mut completed = false;
+    if let Some(task_wrapper) = &mut agent.active_task {
+        match &mut task_wrapper.task {
+            AgentTask::Move { path, ..} => {
+                if let Some(next) = path.pop() {
+                    if !grid.is_occupied(next) {
+                        let x_dir = next.x as i32 - agent.position.x as i32;
+                        let y_dir = next.y as i32 - agent.position.y as i32;
+                        if x_dir < 0 {
+                            agent.direction = Nx;
+                        }
+                        else if x_dir > 0 {
+                            agent.direction = Px;
+                        }
+                        else if y_dir < 0 {
+                            agent.direction = Ny;
+                        }
+                        else {
+                            agent.direction = Py;
+                        }
+                        grid.move_agent(agent.position, next);
+                        agent.position = next;
+
+                    }
+                    else {
+                        if let Some(destination) = agent.destination {
+                            if let Some(path) = find_path(agent.position, destination, grid) {
+                                agent.tasks.insert(0, AgentTask::Move {
+                                    path: path,
+                                    destination: destination,
+                                });
+                            }
+                        }
+                        completed = true;
+                    }
+                }
+                else {
+                    completed = true;
+                }
             }
-        }
-        else if position.2 < GRID_HEIGHT - 1
-            && grid[grid.get_vector_pos((next.0, next.1, next.2 + 1)).unwrap()].cube_type == EMPTY_CUBE
-            && grid[grid.get_vector_pos((next.0, next.1, next.2 + 1)).unwrap()].agent.is_none()
-            && next_cube.is_walkable(){
-            neighbours.push((next.0, next.1, next.2 + 1));
+            AgentTask::FindPath { destination } => {
+                let start = agent.destination.or(Some(agent.position)).unwrap();
+                {
+                    if let Some(path) = find_path(start, *destination, grid) {
+                        agent.tasks.insert(0, AgentTask::Move {
+                            path: path,
+                            destination: destination.clone(),
+                        });
+                    }
+
+                    completed = true;
+                }
+
+            }
+            AgentTask::Plough { .. } => {
+
+
+                completed = true;
+            }
+            AgentTask::Dig { target } => {
+                if agent.position.z > 0 {
+                    grid.delete_cube(*target);
+                }
+                completed = true;
+            }
+            AgentTask::Place { target, cube } => {
+                grid.place_cube(*target, cube.clone());
+                completed = true;
+            }
         }
     }
-    neighbours
+    if completed {
+        if let Some(task_wrapper) = &mut agent.active_task {
+            task_wrapper.completed = true;
+        }
+    }
+}
+
+pub fn run_agent_loop(game_tick: usize, grid: &mut Grid, agents: &mut Vec<Agent>, game_events_receiver: &Receiver<AgentEvent>, grid_events_receiver: &Receiver<GridChangeEvent>) {
+
+    for event in grid_events_receiver.try_iter() {
+        grid.handle_grid_change_event(event);
+    }
+    {
+        match game_events_receiver.try_recv() {
+            Ok(ev) => {
+                match ev {
+                    AgentAddTask { agent, task } => {
+                        println!("got task");
+                        agents[agent].tasks.push(task);
+                    },
+                }
+
+            },
+            Err(_) => {},
+        }
+        for agent in agents.iter_mut() {
+            agent.advance_animation_state();
+            if let Some(active_task) = &agent.active_task {
+                if game_tick < active_task.end_tick {
+                    continue;
+                }
+                advance_task(agent, grid);
+
+                if let Some(task) = &agent.active_task {
+                    if !task.completed {
+                        continue;
+                    }
+                    agent.active_task = None;
+                }
+            }
+
+            if agent.tasks.is_empty() {
+                agent.change_animation("idle");
+                continue;
+            }
+            let mut next_task = agent.tasks.remove(0);
+            let mut cancel_task = false;
+            if let Some(required_positions) = next_task.get_required_position() {
+                if !required_positions.contains(&agent.position) {
+                    println!("not in required pos");
+                    for pos in required_positions {
+                        {
+                            if let Some(path) = find_path(agent.position, pos, grid) {
+                                agent.tasks.insert(0, next_task.clone());
+                                next_task = AgentTask::Move {
+                                    destination: pos,
+                                    path: path,
+                                };
+                                cancel_task = false;
+                                break;
+                            }
+                        }
+                        cancel_task = true;
+                    }
+                }
+            }
+
+            let end_tick = match &next_task {
+                AgentTask::Plough {..} => {
+                    agent.change_animation("ploughing");
+                    game_tick + 15
+                },
+
+                AgentTask::Move { .. } => {
+                    agent.change_animation("running");
+                    game_tick + 1
+                }
+                AgentTask::FindPath { .. } => {
+                    game_tick
+                }
+                AgentTask::Dig { .. } => {
+                    agent.change_animation("mining");
+                    game_tick + 20
+                }
+                AgentTask::Place { .. } => {
+                    game_tick + 9
+                }
+            };
+            let task = AgentCoroutine {
+                task: next_task,
+                end_tick,
+                completed: false,
+            };
+            agent.active_task = if cancel_task { None } else { Some(task) };
+
+        }
+    }
 }
 
 pub enum AgentEvent {
@@ -162,8 +328,8 @@ pub struct Agent {
     pub animation: Arc<Animation>,
     pub animation_state: usize,
     pub animation_pool: Arc<AnimationPool>,
-    pub position: (usize, usize, usize),
-    pub destination: Option<(usize, usize, usize)>,
+    pub position: WorldPos,
+    pub destination: Option<WorldPos>,
     pub tasks: Vec<AgentTask>,
     pub active_task: Option<AgentCoroutine>,
     pub id: usize,
@@ -172,7 +338,7 @@ pub struct Agent {
 
 impl Agent {
 
-    pub fn get_current_animation_frame(&self, compass: &Compass) -> &Sprite {
+    pub fn get_current_animation_frame(&self, compass: Compass) -> &Sprite {
         match &*self.animation {
             Animation::CameraFacingAnimation {frames, ..} => &frames[self.animation_state],
             Animation::CompassAwareAnimation {frames_ne, frames_nw, frames_se, frames_sw, ..} => {
@@ -219,7 +385,7 @@ impl Agent {
 }
 
 pub struct AgentCoroutine {
-    pub end_tick: u32,
+    pub end_tick: usize,
     pub task: AgentTask,
     pub completed: bool,
 }
@@ -227,20 +393,20 @@ pub struct AgentCoroutine {
 #[derive(Clone)]
 pub enum AgentTask {
     Move {
-        path: Vec<(usize, usize, usize)>,
-        destination: (usize, usize, usize),
+        path: Vec<WorldPos>,
+        destination: WorldPos,
     },
     FindPath {
-        destination: (usize, usize, usize),
+        destination: WorldPos,
     },
     Plough {
-        target: (usize, usize, usize)
+        target: WorldPos
     },
     Dig {
-        target: (usize, usize, usize),
+        target: WorldPos,
     },
     Place {
-        target: (usize, usize, usize),
+        target: WorldPos,
         cube: Cube
     }
 }
@@ -251,13 +417,13 @@ impl AgentTask {
     /**
     * return the positions required by the agent in order to perform this task
     */
-    pub fn get_required_position(&self) -> Option<Vec<(usize, usize, usize)>> {
+    pub fn get_required_position(&self) -> Option<Vec<WorldPos>> {
         match self {
             AgentTask::Move { .. } => None,
             AgentTask::FindPath { .. } => None,
-            AgentTask::Plough { target } => Some(vec![(target.0, target.1, target.2 + 1)]),
-            AgentTask::Dig { target } => Some(find_horizontal_neighbours((target.0, target.1, target.2 + 1))),
-            AgentTask::Place { target, .. } => Some(find_horizontal_neighbours((target.0, target.1, target.2)))
+            AgentTask::Plough { target } => Some(vec![WorldPos::new(target.x, target.y, target.z + 1)]),
+            AgentTask::Dig { target } => Some(WorldPos::new(target.x, target.y, target.z + 1).horizontal_neighbours()),
+            AgentTask::Place { target, .. } => Some(WorldPos::new(target.x, target.y, target.z).horizontal_neighbours()),
         }
     }
 }
